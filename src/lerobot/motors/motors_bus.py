@@ -81,6 +81,8 @@ class MotorNormMode(str, Enum):
     RANGE_0_100 = "range_0_100"
     RANGE_M100_100 = "range_m100_100"
     DEGREES = "degrees"
+    RANGE_0_1 = "range_0_1"
+    RANGE_M1_1 = "range_m1_1"
 
 
 @dataclass
@@ -797,6 +799,12 @@ class MotorsBus(abc.ABC):
                 mid = (min_ + max_) / 2
                 max_res = self.model_resolution_table[self._id_to_model(id_)] - 1
                 normalized_values[id_] = (val - mid) * 360 / max_res
+            elif self.motors[motor].norm_mode is MotorNormMode.RANGE_0_1:
+                norm = (bounded_val - min_) / (max_ - min_)
+                normalized_values[id_] = 1 - norm if drive_mode else norm
+            elif self.motors[motor].norm_mode is MotorNormMode.RANGE_M1_1:
+                norm = ((bounded_val - min_) / (max_ - min_)) * 2 - 1
+                normalized_values[id_] = -norm if drive_mode else norm
             else:
                 raise NotImplementedError
 
