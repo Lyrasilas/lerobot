@@ -67,9 +67,15 @@ class Racecar(Robot):
         logger.info("Calibrating Racecar...")
         for motor_name in self.motors:
             if motor_name not in self.calibration:
-                self.calibration[motor_name] = MotorCalibration(offset=0.0, scale=1.0)
+                self.calibration[motor_name] = MotorCalibration(
+                    id=self.motors[motor_name].id,
+                    drive_mode=0,
+                    homing_offset=0.0,
+                    range_min=-1.0 if self.motors[motor_name].norm_mode == MotorNormMode.RANGE_M1_1 else 0.0,
+                    range_max=1.0 if self.motors[motor_name].norm_mode == MotorNormMode.RANGE_M1_1 else 1.0,
+                )
                 logger.info(f"Calibrated {motor_name} with default values.")
-        self._save_calibration()
+        # self._save_calibration()
         logger.info("Racecar calibration completed.")
         
     def configure(self):
@@ -78,26 +84,50 @@ class Racecar(Robot):
     def get_observation(self):
         pass
     
-    def send_action(self, action: dict[str, Any]) -> None:
+    def send_action(self, action: dict[str, Any]) -> dict[str, Any]:
+        """Command racecar to move to a target configuration.
+
+        The relative action magnitude may be clipped depending on the configuration parameter
+        `max_relative_target`. In this case, the action sent differs from original action.
+        Thus, this function always returns the action actually sent.
+
+        Raises
+        ------
+        DeviceNotConnectedError
+            If the racecar is not connected.
+
+        Returns
+        -------
+        dict
+            The action sent to the motors, potentially clipped.
+        """
         if not self.is_connected:
             raise DeviceNotConnectedError(f"{self} is not connected.")
-        
-        for motor_name, motor in self.motors.items():
-            if motor_name in action:
-                goal_pos = ensure_safe_goal_position(
-                    motor_name,
-                    action[motor_name],
-                    self.calibration.get(motor_name),
-                    motor.norm_mode,
-                )
-                motor.set_goal_position(goal_pos)
-                logger.debug(f"Set {motor_name} to {goal_pos}")
-            else:
-                logger.warning(f"Action for {motor_name} not provided.")
-        
+
+        # Extract goal positions from action dict
+        goal_pos = {key.removesuffix(".pos"): val for key, val in action.items() if key.endswith(".pos")}
+
+        # Cap goal position if max_relative_target is set (simulated logic)
+        if hasattr(self.config, "max_relative_target") and self.config.max_relative_target is not None:
+            present_pos = {motor: motor_obj.goal_position for motor, motor_obj in self.motors.items()}
+            goal_present_pos = {key: (g_pos, present_pos[key]) for key, g_pos in goal_pos.items()}
+            goal_pos = ensure_safe_goal_position(goal_present_pos, self.config.max_relative_target)
+
+        # Set goal position for each motor
+        for motor_name, val in goal_pos.items():
+            self.motors[motor_name].set_goal_position(val)
+            logger.debug(f"Set {motor_name} to {val}")
+
         # Simulate sending commands to the motors
-        time.sleep(0.1)  # Simulate some delay
+        time.sleep(0.1)
         logger.info("Actions sent to Racecar motors.")
-        
+
+        # Return the actual action sent
+        return {f"{motor}.pos": val for motor, val in goal_pos.items()}
+    
     def disconnect(self):
-        self.is_connected = False
+        pass  # Optionally add any simulated disconnect logic here
+    
+    def connect(self, calibrate: bool = True) -> None:
+        """Simulated connect method for Racecar."""
+        pass
