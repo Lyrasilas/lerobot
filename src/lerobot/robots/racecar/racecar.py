@@ -2,6 +2,7 @@ import logging
 import time
 from functools import cached_property
 from typing import Any
+import numpy as np
 
 from lerobot.cameras.utils import make_cameras_from_configs
 from lerobot.errors import DeviceAlreadyConnectedError, DeviceNotConnectedError
@@ -81,8 +82,24 @@ class Racecar(Robot):
     def configure(self):
         pass  # No specific configuration needed for the racecar
     
-    def get_observation(self):
-        pass
+    def get_observation(self) -> dict[str, Any]:
+        if not self.is_connected:
+            raise DeviceNotConnectedError(f"{self} is not connected.")
+
+        # Simulate reading motor positions
+        start = time.perf_counter()
+        obs_dict = {f"{motor}.pos": self.motors[motor].goal_position for motor in self.motors}
+        dt_ms = (time.perf_counter() - start) * 1e3
+        logger.debug(f"{self} read state: {dt_ms:.1f}ms")
+
+        # Simulate capturing images from cameras
+        for cam_key, cam in self.cameras.items():
+            start = time.perf_counter()
+            obs_dict[cam_key] = cam.async_read()
+            dt_ms = (time.perf_counter() - start) * 1e3
+            logger.debug(f"{self} read {cam_key}: {dt_ms:.1f}ms")
+
+        return obs_dict
     
     def send_action(self, action: dict[str, Any]) -> dict[str, Any]:
         """Command racecar to move to a target configuration.
