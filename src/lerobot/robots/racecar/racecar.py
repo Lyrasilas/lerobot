@@ -15,6 +15,16 @@ from .config_racecar import RacecarConfig
 logger = logging.getLogger(__name__)
 
 
+class DummyMotor:
+    """A simple dummy motor with a goal_position attribute."""
+    def __init__(self, id, norm_mode):
+        self.id = id
+        self.norm_mode = norm_mode
+        self.goal_position = 0.0
+
+    def set_goal_position(self, value: float):
+        self.goal_position = float(value)
+
 class Racecar(Robot):
     """
     The Racecar robot platform, often used for autonomous driving research and education.
@@ -27,9 +37,9 @@ class Racecar(Robot):
         super().__init__(config)
         self.config = config
         self.motors = {
-            "steering": Motor(1, "generic", MotorNormMode.RANGE_M1_1),
-            "throttle": Motor(2, "generic", MotorNormMode.RANGE_0_1),
-            "brake": Motor(3, "generic", MotorNormMode.RANGE_0_1),
+            "steering": DummyMotor(1, MotorNormMode.RANGE_M1_1),
+            "throttle": DummyMotor(2, MotorNormMode.RANGE_0_1),
+            "brake": DummyMotor(3, MotorNormMode.RANGE_0_1),
         }
         self.cameras = make_cameras_from_configs(config.cameras)
         
@@ -93,11 +103,10 @@ class Racecar(Robot):
         logger.debug(f"{self} read state: {dt_ms:.1f}ms")
 
         # Simulate capturing images from cameras
-        for cam_key, cam in self.cameras.items():
-            start = time.perf_counter()
-            obs_dict[cam_key] = cam.async_read()
-            dt_ms = (time.perf_counter() - start) * 1e3
-            logger.debug(f"{self} read {cam_key}: {dt_ms:.1f}ms")
+        for cam_key in self.cameras:
+            cam_cfg = self.config.cameras[cam_key]
+            obs_dict[cam_key] = np.zeros((cam_cfg.height, cam_cfg.width, 3), dtype=np.uint8)
+            logger.debug(f"{self} simulated {cam_key} image.")
 
         return obs_dict
     
