@@ -227,6 +227,7 @@ def train(cfg: TrainPipelineConfig):
         is_log_step = cfg.log_freq > 0 and step % cfg.log_freq == 0
         is_saving_step = step % cfg.save_freq == 0 or step == cfg.steps
         is_eval_step = cfg.eval_freq > 0 and step % cfg.eval_freq == 0
+        is_DRL_step = cfg.DRL_freq > 0 and step % cfg.DRL_freq == 0
 
         if is_log_step:
             logging.info(train_tracker)
@@ -277,6 +278,11 @@ def train(cfg: TrainPipelineConfig):
                 wandb_log_dict = {**eval_tracker.to_dict(), **eval_info}
                 wandb_logger.log_dict(wandb_log_dict, step, mode="eval")
                 wandb_logger.log_video(eval_info["video_paths"][0], step, mode="eval")
+
+        if is_DRL_step:
+            # Inserting DRL into the training loop
+            logging.info("Performing DRL step")
+            # TODO: implement DRL step
 
     if eval_env:
         eval_env.close()
