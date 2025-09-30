@@ -283,6 +283,7 @@ def train(cfg: TrainPipelineConfig):
             # Inserting DRL into the training loop
             logging.info("Performing DRL step")
             # TODO: implement DRL step
+            pass
 
     if eval_env:
         eval_env.close()
