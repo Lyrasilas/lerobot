@@ -8,6 +8,8 @@ from lerobot.cameras.utils import make_cameras_from_configs
 from lerobot.errors import DeviceAlreadyConnectedError, DeviceNotConnectedError
 from lerobot.motors import Motor, MotorCalibration, MotorNormMode
 
+from Gymnasium import gymnasium
+
 from ..robot import Robot
 from ..utils import ensure_safe_goal_position
 from .config_racecar import RacecarConfig   
@@ -42,6 +44,9 @@ class Racecar(Robot):
             "brake": DummyMotor(3, MotorNormMode.RANGE_0_1),
         }
         self.cameras = make_cameras_from_configs(config.cameras)
+
+        self.env = gymnasium.make("CarRacing-v3", render_mode="human", continuous=True)
+        self._env_obs, _ = self.env.reset()
         
     @property
     def _motors_ft(self) -> dict[str, type]:
@@ -104,8 +109,9 @@ class Racecar(Robot):
 
         # Simulate capturing images from cameras
         for cam_key in self.cameras:
-            cam_cfg = self.config.cameras[cam_key]
-            obs_dict[cam_key] = np.zeros((cam_cfg.height, cam_cfg.width, 3), dtype=np.uint8)
+            # cam_cfg = self.config.cameras[cam_key]
+            # obs_dict[cam_key] = np.zeros((cam_cfg.height, cam_cfg.width, 3), dtype=np.uint8)
+            obs_dict[cam_key] = self._env_obs
             logger.debug(f"{self} simulated {cam_key} image.")
 
         return obs_dict
@@ -145,8 +151,10 @@ class Racecar(Robot):
             logger.debug(f"Set {motor_name} to {val}")
 
         # Simulate sending commands to the motors
-        time.sleep(0.1)
-        logger.info("Actions sent to Racecar motors.")
+        # time.sleep(0.1)
+        action_values = np.array([val for key, val in action.items() if key.endswith(".pos")], dtype=np.float32)
+        self._env_obs, _, _, _, _ = self.env.step(action_values)
+        # logger.info("Actions sent to Racecar motors.")
 
         # Return the actual action sent
         return {f"{motor}.pos": val for motor, val in goal_pos.items()}

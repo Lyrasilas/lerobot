@@ -131,7 +131,7 @@ class DatasetRecordConfig:
     # Number of seconds for data recording for each episode.
     episode_time_s: int | float = 60
     # Number of seconds for resetting the environment after each episode.
-    reset_time_s: int | float = 60
+    reset_time_s: int | float = 5
     # Number of episodes to record.
     num_episodes: int = 50
     # Encode frames in the dataset into video
@@ -230,13 +230,14 @@ def record_loop(
 
     timestamp = 0
     start_episode_t = time.perf_counter()
+    # robot.env.reset()  # or robot.reset() if you have such a method
+    log_reset_warning = False
     while timestamp < control_time_s:
         start_loop_t = time.perf_counter()
 
         if events["exit_early"]:
             events["exit_early"] = False
             break
-
         observation = robot.get_observation()
 
         if policy is not None or dataset is not None:
@@ -264,11 +265,15 @@ def record_loop(
 
             action = {**arm_action, **base_action} if len(base_action) > 0 else arm_action
         else:
-            logging.info(
-                "No policy or teleoperator provided, skipping action generation."
-                "This is likely to happen when resetting the environment without a teleop device."
-                "The robot won't be at its rest position at the start of the next episode."
-            )
+            robot.env.reset()
+            if not log_reset_warning:
+                logging.info(
+                    "No policy or teleoperator provided, skipping action generation."
+                    "This is likely to happen when resetting the environment without a teleop device."
+                    "The robot won't be at its rest position at the start of the next episode."
+                )
+                log_reset_warning = True
+                events["exit_early"] = True
             continue
 
         # Action can eventually be clipped using `max_relative_target`,
@@ -285,7 +290,6 @@ def record_loop(
 
         dt_s = time.perf_counter() - start_loop_t
         busy_wait(1 / fps - dt_s)
-
         timestamp = time.perf_counter() - start_episode_t
 
 
