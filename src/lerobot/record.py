@@ -67,6 +67,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from pprint import pformat
 
+import lerobot
 from lerobot.cameras import (  # noqa: F401
     CameraConfig,  # noqa: F401
 )
@@ -204,6 +205,8 @@ def record_loop(
     single_task: str | None = None,
     display_data: bool = False,
 ):
+    import lerobot.robots.racecar.racecar
+    print(lerobot.robots.racecar.racecar.__file__)
     if dataset is not None and dataset.fps != fps:
         raise ValueError(f"The dataset fps should be equal to requested fps ({dataset.fps} != {fps}).")
 
@@ -366,6 +369,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
                 (recorded_episodes < cfg.dataset.num_episodes - 1) or events["rerecord_episode"]
             ):
                 log_say("Reset the environment", cfg.play_sounds)
+                print("[DEBUG] Resetting the environment...")
                 record_loop(
                     robot=robot,
                     events=events,
