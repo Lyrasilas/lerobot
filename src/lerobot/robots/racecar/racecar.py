@@ -112,7 +112,7 @@ class Racecar(Robot):
         for cam_key in self.cameras:
             # cam_cfg = self.config.cameras[cam_key]
             # obs_dict[cam_key] = np.zeros((cam_cfg.height, cam_cfg.width, 3), dtype=np.uint8)
-            obs_dict[cam_key] = self._env_obs
+            obs_dict[cam_key] = self._env_obs[:168]
             logger.debug(f"{self} simulated {cam_key} image.")
 
         return obs_dict
