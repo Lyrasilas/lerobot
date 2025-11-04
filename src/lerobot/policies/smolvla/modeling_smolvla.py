@@ -163,11 +163,13 @@ def load_smolvla(
 
     missing, unexpected = model.load_state_dict(state_dict, strict=False)
 
-    if not all(key.startswith(norm_keys) for key in missing) or unexpected:
+    # Allow missing keys for actor head (new layers)
+    critical_missing = [k for k in missing if "actor_head" not in k]
+    if not all(key.startswith(norm_keys) for key in critical_missing) or unexpected:
         raise RuntimeError(
-            "SmolVLA %d missing / %d unexpected keys",
-            len(missing),
-            len(unexpected),
+            f"SmolVLA {len(critical_missing)} missing / {len(unexpected)} unexpected keys",
+            critical_missing,
+            unexpected,
         )
 
     return model
