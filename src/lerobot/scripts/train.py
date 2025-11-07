@@ -18,6 +18,7 @@ import time
 from contextlib import nullcontext
 from pprint import pformat
 from typing import Any
+import numpy as np
 
 import torch
 from termcolor import colored
