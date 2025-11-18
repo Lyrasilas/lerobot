@@ -45,7 +45,7 @@ class Racecar(Robot):
         }
         self.cameras = make_cameras_from_configs(config.cameras)
 
-        self.env = gymnasium.make("CarRacing-v3", render_mode="rgb_array", continuous=True)
+        self.env = gymnasium.make("CarRacing-v3", render_mode="rgb_array", continuous=True, track_style="NASCAR", view="center")
         print("[DEBUG] Racecar environment created successfully.")
         self._env_obs, _ = self.env.reset()
         
@@ -112,7 +112,7 @@ class Racecar(Robot):
         for cam_key in self.cameras:
             # cam_cfg = self.config.cameras[cam_key]
             # obs_dict[cam_key] = np.zeros((cam_cfg.height, cam_cfg.width, 3), dtype=np.uint8)
-            obs_dict[cam_key] = self._env_obs[:168]
+            obs_dict[cam_key] = self._env_obs
             logger.debug(f"{self} simulated {cam_key} image.")
 
         return obs_dict
