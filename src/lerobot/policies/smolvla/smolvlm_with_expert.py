@@ -23,6 +23,11 @@ from transformers import (
     AutoProcessor,
     SmolVLMForConditionalGeneration,
 )
+# TODO: Import FSDP for distributed training
+try:
+    from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+except ImportError:
+    FSDP = None  # FSDP not available
 
 
 def apply_rope(x, positions, max_wavelength=10_000):
@@ -74,11 +79,17 @@ class SmolVLMWithExpertModel(nn.Module):
         super().__init__()
         if load_vlm_weights:
             print(f"Loading  {model_id} weights ...")
+            # Defer device placement and sharding to `accelerate` (FSDP) or
+            # the training launcher. Avoid using `device_map="auto"` or
+            # `low_cpu_mem_usage=True` here because those perform automatic
+            # device dispatch which conflicts with FSDP/accelerate-managed
+            # wrapping. Load weights into CPU memory and let the launcher
+            # place/wrap the model.
             self.vlm = AutoModelForImageTextToText.from_pretrained(
                 model_id,
-                device_map="auto",
+                # keep dtype hint but do not force device placement here
                 torch_dtype="bfloat16",
-                low_cpu_mem_usage=True,
+                device_map=None,
             )
             config = self.vlm.config
         else:
@@ -102,6 +113,11 @@ class SmolVLMWithExpertModel(nn.Module):
             )
             lm_expert_config.num_hidden_layers = num_expert_layers
         self.lm_expert = AutoModel.from_config(lm_expert_config)
+
+        # TODO: Wrap with FSDP for distributed training
+        if FSDP is not None:
+            self.vlm = FSDP(self.vlm)
+            self.lm_expert = FSDP(self.lm_expert)
 
         self.num_expert_layers = len(self.lm_expert.layers)
         self.self_attn_every_n_layers = self_attn_every_n_layers

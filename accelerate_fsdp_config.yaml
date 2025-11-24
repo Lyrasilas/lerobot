@@ -1,0 +1,39 @@
+# Example Accelerate config for FSDP
+# Adjust `num_processes` to the number of GPUs per node you will use.
+# To launch: `accelerate launch --config_file accelerate_fsdp_config.yaml lerobot/src/lerobot/scripts/train.py --your-args`
+
+compute_environment: LOCAL_MACHINE
+distributed_type: FSDP
+num_machines: 1
+# num_processes is GPUs per node
+num_processes: 1
+main_process_ip: "127.0.0.1"
+main_process_port: 12355
+
+# Top-level flags
+downcast_bf16: false
+
+# FSDP-specific options. Tweak these depending on your cluster and torch/accelerate version.
+fsdp_config:
+  # FULL_SHARD is most memory-efficient; try SHARD_GRAD_OP or others if needed.
+  sharding_strategy: FULL_SHARD
+  # Offload parameters to CPU to reduce GPU memory peaks (useful on limited-GPU hosts)
+  cpu_offload: true
+  # Try to flatten parameters to improve performance
+  flatten_parameters: true
+  # mixed_precision: bf16 is highly recommended on A100/H100; use fp16 on older GPUs.
+  mixed_precision: bf16
+  # Backward prefetching strategy (NONE/SHARD/FULL). NONE is simplest.
+  backward_prefetch: "NONE"
+  # If you want activation checkpointing, enable and configure separately in your training code.
+  activation_checkpointing: false
+
+# Optional: list of module names to ignore wrapping or special-case. Leave empty for automatic wrapping.
+# ignored_modules: []
+
+# Note:
+# - This file aims for minimal compatibility across accelerate versions; if your accelerate wants slightly
+#   different keys, adapt `fsdp_config` accordingly (accelerate docs for your version are authoritative).
+# - Make sure your training script uses `accelerator.prepare(model, optimizer, dataloader)` or
+#   uses `Accelerator` so model/optim/dataloader get placed and sharded correctly.
+# - We removed `device_map="auto"` from model loading so accelerate/FSDP can control placement.

@@ -31,8 +31,22 @@ from PIL import Image
 
 
 def get_safe_default_codec():
+    # Prefer torchcodec when it can be imported successfully. `importlib.util.find_spec`
+    # only reports that the package exists on sys.path — it does not guarantee
+    # that native shared libraries (FFmpeg, libtorch symbols) used by torchcodec
+    # will load correctly. Try to import the package and fall back to `pyav`
+    # when any import-time error occurs.
     if importlib.util.find_spec("torchcodec"):
-        return "torchcodec"
+        try:
+            # Try a real import to validate native dependencies at startup.
+            importlib.import_module("torchcodec")
+            return "torchcodec"
+        except Exception as e:  # pragma: no cover - runtime environment dependent
+            logging.warning(
+                "Found 'torchcodec' on PYTHONPATH but failed to import it (%s). Falling back to 'pyav'.",
+                str(e),
+            )
+            return "pyav"
     else:
         logging.warning(
             "'torchcodec' is not available in your platform, falling back to 'pyav' as a default decoder"
