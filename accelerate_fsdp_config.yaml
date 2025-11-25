@@ -7,7 +7,7 @@ distributed_type: FSDP
 num_machines: 1
 # num_processes is GPUs per node
 num_processes: 1
-main_process_ip: "127.0.0.1"
+main_process_ip: "10.116.42.1"
 main_process_port: 12355
 
 # Top-level flags

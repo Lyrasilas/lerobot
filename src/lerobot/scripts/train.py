@@ -13,33 +13,54 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+print("[DEBUG] Starting train.py imports")
 import logging
 import time
 from contextlib import nullcontext
 from pprint import pformat
 from typing import Any
 import numpy as np
+print("[DEBUG] Imported numpy")
 
 import torch
+print("[DEBUG] Imported torch")
 from termcolor import colored
+print("[DEBUG] Imported termcolor")
 from torch.amp import GradScaler
+print("[DEBUG] Imported GradScaler")
 from torch.optim import Optimizer
+print("[DEBUG] Imported Optimizer")
 import gymnasium as gym
+print("[DEBUG] Imported gymnasium")
 from collections import namedtuple
+print("[DEBUG] Imported namedtuple")
 
 from lerobot.configs import parser
+print("[DEBUG] Imported lerobot.configs.parser")
 from lerobot.configs.train import TrainPipelineConfig
+print("[DEBUG] Imported lerobot.configs.train")
 from lerobot.datasets.factory import make_dataset
+print("[DEBUG] Imported lerobot.datasets.factory")
 from lerobot.datasets.sampler import EpisodeAwareSampler
+print("[DEBUG] Imported lerobot.datasets.sampler")
 from lerobot.datasets.utils import cycle
+print("[DEBUG] Imported lerobot.datasets.utils.cycle")
 from lerobot.envs.factory import make_env
+print("[DEBUG] Imported lerobot.envs.factory")
 from lerobot.optim.factory import make_optimizer_and_scheduler
+print("[DEBUG] Imported lerobot.optim.factory")
 from lerobot.policies.factory import make_policy
+print("[DEBUG] Imported lerobot.policies.factory")
 from lerobot.policies.pretrained import PreTrainedPolicy
+print("[DEBUG] Imported lerobot.policies.pretrained")
 from lerobot.policies.utils import get_device_from_parameters
+print("[DEBUG] Imported lerobot.policies.utils")
 from lerobot.scripts.eval import eval_policy
+print("[DEBUG] Imported lerobot.scripts.eval")
 from lerobot.utils.logging_utils import AverageMeter, MetricsTracker
+print("[DEBUG] Imported lerobot.utils.logging_utils")
 from lerobot.utils.random_utils import set_seed
+print("[DEBUG] Imported lerobot.utils.random_utils")
 from lerobot.utils.train_utils import (
     get_step_checkpoint_dir,
     get_step_identifier,
@@ -47,13 +68,18 @@ from lerobot.utils.train_utils import (
     save_checkpoint,
     update_last_checkpoint,
 )
+print("[DEBUG] Imported lerobot.utils.train_utils")
 from lerobot.utils.utils import (
     format_big_number,
     get_safe_torch_device,
     has_method,
     init_logging,
 )
+print("[DEBUG] Imported lerobot.utils.utils")
 from lerobot.utils.wandb_utils import WandBLogger
+print("[DEBUG] Imported lerobot.utils.wandb_utils")
+from lerobot.utils.buffer import ReplayBuffer
+print("[DEBUG] Imported lerobot.utils.buffer ReplayBuffer")
 
 
 def update_policy(
@@ -110,49 +136,71 @@ def update_policy(
 
 @parser.wrap()
 def train(cfg: TrainPipelineConfig):
+    print("[DEBUG] train() called")
     cfg.validate()
+    print("[DEBUG] cfg validated")
     logging.info(pformat(cfg.to_dict()))
 
+    print("[DEBUG] Setting up wandb logger")
     if cfg.wandb.enable and cfg.wandb.project:
         wandb_logger = WandBLogger(cfg)
     else:
         wandb_logger = None
         logging.info(colored("Logs will be saved locally.", "yellow", attrs=["bold"]))
 
+    print("[DEBUG] Setting seed")
     if cfg.seed is not None:
         set_seed(cfg.seed)
 
     # Check device is available
+    print("[DEBUG] Getting device")
     device = get_safe_torch_device(cfg.policy.device, log=True)
+    print(f"[DEBUG] Device: {device}")
     torch.backends.cudnn.benchmark = True
     torch.backends.cuda.matmul.allow_tf32 = True
 
+
+    print("[DEBUG] Creating dataset")
     logging.info("Creating dataset")
     dataset = make_dataset(cfg)
+    print("[DEBUG] Dataset created")
 
+    # replay_keys 
+    replay_buffer = ReplayBuffer(capacity=cfg.replay_capacity, device=device, state_keys=dataset.features["action"])
+    print("DEBUG:", dataset.features, "------------------------------------")
+    
     # Create environment used for evaluating checkpoints during training on simulation data.
     # On real-world data, no need to create an environment as evaluations are done outside train.py,
     # using the eval.py instead, with gym_dora environment and dora-rs.
+    print("[DEBUG] Creating eval env")
     eval_env = None
     if cfg.eval_freq > 0 and cfg.env is not None:
         logging.info("Creating env")
         eval_env = make_env(cfg.env, n_envs=cfg.eval.batch_size, use_async_envs=cfg.eval.use_async_envs)
+        print("[DEBUG] Eval env created")
 
+    print("[DEBUG] Creating policy")
     logging.info("Creating policy")
     policy = make_policy(
         cfg=cfg.policy,
         ds_meta=dataset.meta,
     )
+    print("[DEBUG] Policy created")
 
+    print("[DEBUG] Creating optimizer and scheduler")
     logging.info("Creating optimizer and scheduler")
     optimizer, lr_scheduler = make_optimizer_and_scheduler(cfg, policy)
     grad_scaler = GradScaler(device.type, enabled=cfg.policy.use_amp)
+    print("[DEBUG] Optimizer, scheduler, grad_scaler created")
 
+    print("[DEBUG] Entering training loop setup")
     step = 0  # number of policy updates (forward + backward + optim)
 
     if cfg.resume:
+        print("[DEBUG] Loading training state from checkpoint")
         step, optimizer, lr_scheduler = load_training_state(cfg.checkpoint_path, optimizer, lr_scheduler)
 
+    print("[DEBUG] Counting parameters")
     num_learnable_params = sum(p.numel() for p in policy.parameters() if p.requires_grad)
     num_total_params = sum(p.numel() for p in policy.parameters())
 
@@ -165,6 +213,7 @@ def train(cfg: TrainPipelineConfig):
     logging.info(f"{num_learnable_params=} ({format_big_number(num_learnable_params)})")
     logging.info(f"{num_total_params=} ({format_big_number(num_total_params)})")
 
+    print("[DEBUG] Creating dataloader")
     # create dataloader for offline training
     if hasattr(cfg.policy, "drop_n_last_frames"):
         shuffle = False
@@ -186,10 +235,14 @@ def train(cfg: TrainPipelineConfig):
         pin_memory=device.type == "cuda",
         drop_last=False,
     )
+    print("[DEBUG] Dataloader created")
     dl_iter = cycle(dataloader)
+    print("[DEBUG] Dataloader iterator created")
 
+    print("[DEBUG] Setting policy to train mode")
     policy.train()
 
+    print("[DEBUG] Initializing metrics")
     train_metrics = {
         "loss": AverageMeter("loss", ":.3f"),
         "grad_norm": AverageMeter("grdn", ":.3f"),
@@ -198,10 +251,12 @@ def train(cfg: TrainPipelineConfig):
         "dataloading_s": AverageMeter("data_s", ":.3f"),
     }
 
+    print("[DEBUG] Initializing train tracker")
     train_tracker = MetricsTracker(
         cfg.batch_size, dataset.num_frames, dataset.num_episodes, train_metrics, initial_step=step
     )
 
+    print("[DEBUG] Starting training loop")
     logging.info("Start offline training on a fixed dataset")
     for _ in range(step, cfg.steps):
         start_time = time.perf_counter()
@@ -293,6 +348,7 @@ def train(cfg: TrainPipelineConfig):
 
     if cfg.policy.push_to_hub:
         policy.push_model_to_hub(cfg)
+
 
 
 def main():

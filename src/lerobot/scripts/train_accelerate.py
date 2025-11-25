@@ -74,10 +74,13 @@ def main():
 
     print("Launching training with accelerate:")
     print(" ".join(cmd))
-
+    
     # Run the command and forward stdout/stderr. Return same exit code.
     try:
+        print("About to launch subprocess...")
+        print(cmd)
         proc = subprocess.run(cmd)
+        print("Subprocess finished with code:", proc.returncode)
         sys.exit(proc.returncode)
     except KeyboardInterrupt:
         print("Interrupted by user")
