@@ -115,7 +115,7 @@ class SmolVLMWithExpertModel(nn.Module):
         self.lm_expert = AutoModel.from_config(lm_expert_config)
 
         # TODO: Wrap with FSDP for distributed training
-        if FSDP is not None:
+        if FSDP is not None and torch.distributed.is_initialized():
             self.vlm = FSDP(self.vlm)
             self.lm_expert = FSDP(self.lm_expert)
 
