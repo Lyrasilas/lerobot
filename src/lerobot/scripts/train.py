@@ -13,54 +13,41 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-print("[DEBUG] Starting train.py imports")
+
 import logging
 import time
 from contextlib import nullcontext
 from pprint import pformat
 from typing import Any
 import numpy as np
-print("[DEBUG] Imported numpy")
+
 
 import torch
-print("[DEBUG] Imported torch")
+
 from termcolor import colored
-print("[DEBUG] Imported termcolor")
+
 from torch.amp import GradScaler
-print("[DEBUG] Imported GradScaler")
+
 from torch.optim import Optimizer
-print("[DEBUG] Imported Optimizer")
+
 import gymnasium as gym
-print("[DEBUG] Imported gymnasium")
+
 from collections import namedtuple
-print("[DEBUG] Imported namedtuple")
+
 
 from lerobot.configs import parser
-print("[DEBUG] Imported lerobot.configs.parser")
 from lerobot.configs.train import TrainPipelineConfig
-print("[DEBUG] Imported lerobot.configs.train")
 from lerobot.datasets.factory import make_dataset
-print("[DEBUG] Imported lerobot.datasets.factory")
 from lerobot.datasets.sampler import EpisodeAwareSampler
-print("[DEBUG] Imported lerobot.datasets.sampler")
 from lerobot.datasets.utils import cycle
-print("[DEBUG] Imported lerobot.datasets.utils.cycle")
 from lerobot.envs.factory import make_env
-print("[DEBUG] Imported lerobot.envs.factory")
 from lerobot.optim.factory import make_optimizer_and_scheduler
-print("[DEBUG] Imported lerobot.optim.factory")
 from lerobot.policies.factory import make_policy
-print("[DEBUG] Imported lerobot.policies.factory")
 from lerobot.policies.pretrained import PreTrainedPolicy
-print("[DEBUG] Imported lerobot.policies.pretrained")
 from lerobot.policies.utils import get_device_from_parameters
-print("[DEBUG] Imported lerobot.policies.utils")
 from lerobot.scripts.eval import eval_policy
-print("[DEBUG] Imported lerobot.scripts.eval")
 from lerobot.utils.logging_utils import AverageMeter, MetricsTracker
-print("[DEBUG] Imported lerobot.utils.logging_utils")
 from lerobot.utils.random_utils import set_seed
-print("[DEBUG] Imported lerobot.utils.random_utils")
 from lerobot.utils.train_utils import (
     get_step_checkpoint_dir,
     get_step_identifier,
@@ -68,18 +55,14 @@ from lerobot.utils.train_utils import (
     save_checkpoint,
     update_last_checkpoint,
 )
-print("[DEBUG] Imported lerobot.utils.train_utils")
 from lerobot.utils.utils import (
     format_big_number,
     get_safe_torch_device,
     has_method,
     init_logging,
 )
-print("[DEBUG] Imported lerobot.utils.utils")
 from lerobot.utils.wandb_utils import WandBLogger
-print("[DEBUG] Imported lerobot.utils.wandb_utils")
 from lerobot.utils.buffer import ReplayBuffer
-print("[DEBUG] Imported lerobot.utils.buffer ReplayBuffer")
 
 
 def update_policy(
@@ -99,6 +82,7 @@ def update_policy(
     with torch.autocast(device_type=device.type) if use_amp else nullcontext():
         loss, output_dict = policy.forward(batch)
         # TODO(rcadene): policy.unnormalize_outputs(out_dict)
+    print("DEBUG: look at output_dict to potentially put into replay buffer", output_dict)
     grad_scaler.scale(loss).backward()
 
     # Unscale the gradient of the optimizer's assigned params in-place **prior to gradient clipping**.
@@ -136,48 +120,40 @@ def update_policy(
 
 @parser.wrap()
 def train(cfg: TrainPipelineConfig):
-    print("[DEBUG] train() called")
     cfg.validate()
-    print("[DEBUG] cfg validated")
     logging.info(pformat(cfg.to_dict()))
 
-    print("[DEBUG] Setting up wandb logger")
     if cfg.wandb.enable and cfg.wandb.project:
         wandb_logger = WandBLogger(cfg)
     else:
         wandb_logger = None
         logging.info(colored("Logs will be saved locally.", "yellow", attrs=["bold"]))
 
-    print("[DEBUG] Setting seed")
     if cfg.seed is not None:
         set_seed(cfg.seed)
 
     # Check device is available
-    print("[DEBUG] Getting device")
     device = get_safe_torch_device(cfg.policy.device, log=True)
-    print(f"[DEBUG] Device: {device}")
     torch.backends.cudnn.benchmark = True
     torch.backends.cuda.matmul.allow_tf32 = True
 
 
-    print("[DEBUG] Creating dataset")
     logging.info("Creating dataset")
     dataset = make_dataset(cfg)
-    print("[DEBUG] Dataset created")
 
-    # replay_keys 
-    replay_buffer = ReplayBuffer(capacity=cfg.replay_capacity, device=device, state_keys=dataset.features["action"])
-    print("DEBUG:", dataset.features, "------------------------------------")
-    
+    logging.info("Creating replay buffer")
+    replay_keys = [
+        "observation.images.front",
+    ]
+    replay_buffer = ReplayBuffer(capacity=cfg.replay_capacity, device=device, state_keys=replay_keys)
+
     # Create environment used for evaluating checkpoints during training on simulation data.
     # On real-world data, no need to create an environment as evaluations are done outside train.py,
     # using the eval.py instead, with gym_dora environment and dora-rs.
-    print("[DEBUG] Creating eval env")
     eval_env = None
     if cfg.eval_freq > 0 and cfg.env is not None:
         logging.info("Creating env")
         eval_env = make_env(cfg.env, n_envs=cfg.eval.batch_size, use_async_envs=cfg.eval.use_async_envs)
-        print("[DEBUG] Eval env created")
 
     print("[DEBUG] Creating policy")
     logging.info("Creating policy")
@@ -261,6 +237,7 @@ def train(cfg: TrainPipelineConfig):
     for _ in range(step, cfg.steps):
         start_time = time.perf_counter()
         batch = next(dl_iter)
+        print("DEBUG: Batch", batch)
         train_tracker.dataloading_s = time.perf_counter() - start_time
 
         for key in batch:
@@ -338,7 +315,10 @@ def train(cfg: TrainPipelineConfig):
                 wandb_logger.log_video(eval_info["video_paths"][0], step, mode="eval")
 
         if is_DRL_step:
-            logging.info("Performing DRL step (Full PPO)")
+            logging.info("Performing DRL step. Full PPO episode.")
+            print("DEBUG:", cfg.env)
+            ppo_env = make_env(cfg.env)
+            print("DEBUG: PPO env created", ppo_env)
             episode_rewards = []
             logging.info(f"DRL episode reward: {sum(episode_rewards):.2f}")
 
