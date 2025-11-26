@@ -17,7 +17,7 @@ import importlib
 
 import gymnasium as gym
 
-from lerobot.envs.configs import AlohaEnv, EnvConfig, HILEnvConfig, PushtEnv, XarmEnv
+from lerobot.envs.configs import AlohaEnv, EnvConfig, HILEnvConfig, PushtEnv, XarmEnv, CarRacingEnvConfig
 
 
 def make_env_config(env_type: str, **kwargs) -> EnvConfig:
@@ -29,6 +29,8 @@ def make_env_config(env_type: str, **kwargs) -> EnvConfig:
         return XarmEnv(**kwargs)
     elif env_type == "hil":
         return HILEnvConfig(**kwargs)
+    elif env_type == "car_racing":
+        return CarRacingEnvConfig(**kwargs) 
     else:
         raise ValueError(f"Policy type '{env_type}' is not available.")
 
@@ -54,6 +56,12 @@ def make_env(cfg: EnvConfig, n_envs: int = 1, use_async_envs: bool = False) -> g
 
     package_name = f"gym_{cfg.type}"
 
+    try: 
+        return gym.make(cfg.task, render_mode=cfg.render_mode, continuous=cfg.continuous, track_style=cfg.track_style, view=cfg.view)
+    except Exception:
+        print("Could not create standard gym environment")
+        pass
+    
     try:
         importlib.import_module(package_name)
     except ModuleNotFoundError as e:

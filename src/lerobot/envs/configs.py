@@ -271,3 +271,35 @@ class HILEnvConfig(EnvConfig):
             "use_gamepad": self.use_gamepad,
             "gripper_penalty": self.gripper_penalty,
         }
+        
+@EnvConfig.register_subclass("car_racing")
+@dataclass
+class CarRacingEnvConfig(EnvConfig):
+    task: str | None = "CarRacing-v3"
+    fps: int = 30
+    episode_length: int = 1000
+    render_mode: str = "rgb_array"
+    continuous: bool = True
+    track_style: str = "NASCAR"
+    num_checkpoints: int = 12
+    view: str = "center"
+    features: dict[str, PolicyFeature] = field(
+        default_factory=lambda: {
+            "action": PolicyFeature(type=FeatureType.ACTION, shape=(3,)),
+            "observation.state": PolicyFeature(type=FeatureType.STATE, shape=(3,)),
+            "observation.image": PolicyFeature(type=FeatureType.VISUAL, shape=(512, 512, 3)),
+        }
+    )
+    features_map: dict[str, str] = field(
+        default_factory=lambda: {
+            "action": ACTION,
+            "observation.state": OBS_STATE,
+            "observation.image": OBS_IMAGE,
+        }
+    )
+
+    @property
+    def gym_kwargs(self) -> dict:
+        return {
+            "max_episode_steps": self.episode_length,
+        }
