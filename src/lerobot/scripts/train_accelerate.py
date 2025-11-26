@@ -27,7 +27,22 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+import torch.distributed as dist
+import torch
 
+# def setup_distributed():
+#     # Detect if running in distributed mode
+#     if dist.is_available() and not dist.is_initialized():
+#         dist.init_process_group(
+#             backend="nccl",  # Use "gloo" for CPU-only
+#             init_method="env://"  # Use environment variables set by your launcher
+#         )
+#         # Optionally set device for each process
+#         local_rank = int(os.environ.get("LOCAL_RANK", 0))
+#         torch.cuda.set_device(local_rank)
+
+# # Call this before any FSDP/model creation
+# setup_distributed()
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CONFIG_FILE = REPO_ROOT / "accelerate_fsdp_config.yaml"
@@ -78,9 +93,7 @@ def main():
     # Run the command and forward stdout/stderr. Return same exit code.
     try:
         print("About to launch subprocess...")
-        print(cmd)
         proc = subprocess.run(cmd)
-        print("Subprocess finished with code:", proc.returncode)
         sys.exit(proc.returncode)
     except KeyboardInterrupt:
         print("Interrupted by user")
