@@ -82,7 +82,7 @@ def update_policy(
     with torch.autocast(device_type=device.type) if use_amp else nullcontext():
         loss, output_dict = policy.forward(batch)
         # TODO(rcadene): policy.unnormalize_outputs(out_dict)
-    print("DEBUG: look at output_dict to potentially put into replay buffer", output_dict)
+    # print("DEBUG: look at output_dict to potentially put into replay buffer", output_dict)
     grad_scaler.scale(loss).backward()
 
     # Unscale the gradient of the optimizer's assigned params in-place **prior to gradient clipping**.
@@ -236,7 +236,9 @@ def train(cfg: TrainPipelineConfig):
     logging.info("Start offline training on a fixed dataset")
     for _ in range(step, cfg.steps):
         start_time = time.perf_counter()
+        print("DEBUG:", dl_iter)
         batch = next(dl_iter)
+        print("DEBUG: Batch keys", batch.keys())
         print("DEBUG: Batch", batch)
         train_tracker.dataloading_s = time.perf_counter() - start_time
 
@@ -316,9 +318,22 @@ def train(cfg: TrainPipelineConfig):
 
         if is_DRL_step:
             logging.info("Performing DRL step. Full PPO episode.")
-            print("DEBUG:", cfg.env)
             ppo_env = make_env(cfg.env)
-            print("DEBUG: PPO env created", ppo_env)
+            obs, info = ppo_env.reset()
+            done = False
+            if not done:
+                action = policy.select_action()
+                # TODO: Create a small batch of 1 to pass to the policy, hopefully this results in only an action chunk of size 1 and not 50.
+                # TODO: Calculate log_prob etc. for PPO
+                # TODO: Store transition in replay buffer
+                # TODO: Perform PPO update steps
+                print("DEBUG: PPO action selected", action)
+                obs, reward, terminated, truncated, info = ppo_env.step(action)
+                print("DEBUG: PPO env step", obs, reward, terminated, truncated, info)
+                done = terminated or truncated  
+            print("DEBUG: PPO episode done", done)
+            
+            
             episode_rewards = []
             logging.info(f"DRL episode reward: {sum(episode_rewards):.2f}")
 
