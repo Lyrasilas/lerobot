@@ -225,6 +225,8 @@ def make_att_2d_masks(pad_masks, att_masks):
     cumsum = torch.cumsum(att_masks, dim=1)
     att_2d_masks = cumsum[:, None, :] <= cumsum[:, :, None]
     pad_2d_masks = pad_masks[:, None, :] * pad_masks[:, :, None]
+    print("DEBUG: att_2d_masks shape", att_2d_masks.shape)
+    print("DEBUG: pad_2d_masks shape", pad_2d_masks.shape)
     att_2d_masks = att_2d_masks & pad_2d_masks
     return att_2d_masks
 
@@ -435,14 +437,15 @@ class SmolVLAPolicy(PreTrainedPolicy):
         queue is empty.
         """
         self.eval()
+        print("DEBUG:", batch)
         batch = self._prepare_batch(batch)
+        print("DEBUG: after prepare batch", batch)
         self._queues = populate_queues(self._queues, batch, exclude_keys=[ACTION])
-
         # Action queue logic for n_action_steps > 1. When the action_queue is depleted, populate it by
         # querying the policy.
         if len(self._queues[ACTION]) == 0:
             actions = self._get_action_chunk(batch, noise)
-
+            print("DEBUG: actions from chunk", len(actions))
             # `self.predict_action_chunk` returns a (batch_size, n_action_steps, action_dim) tensor, but the queue
             # effectively has shape (n_action_steps, batch_size, *), hence the transpose.
             self._queues[ACTION].extend(actions.transpose(0, 1)[: self.config.n_action_steps])
@@ -462,6 +465,7 @@ class SmolVLAPolicy(PreTrainedPolicy):
         actions = self.prepare_action(batch)
         actions_is_pad = batch.get("actions_id_pad")
         loss_dict = {}
+        print("DEBUG:", images[0].shape, img_masks[0].shape, lang_tokens.shape, lang_masks.shape, state.shape, actions.shape)
         losses = self.model.forward(images, img_masks, lang_tokens, lang_masks, state, actions, noise, time)
         loss_dict["losses_after_forward"] = losses.clone()
 
@@ -850,6 +854,9 @@ class VLAFlowMatching(nn.Module):
 
         pad_masks = torch.cat([prefix_pad_masks, suffix_pad_masks], dim=1)
         att_masks = torch.cat([prefix_att_masks, suffix_att_masks], dim=1)
+
+        print("DEBUG: pad_masks shape", pad_masks.shape)
+        print("DEBUG: att_masks shape", att_masks.shape)
 
         att_2d_masks = make_att_2d_masks(pad_masks, att_masks)
         position_ids = torch.cumsum(pad_masks, dim=1) - 1

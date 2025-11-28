@@ -236,10 +236,10 @@ def train(cfg: TrainPipelineConfig):
     logging.info("Start offline training on a fixed dataset")
     for _ in range(step, cfg.steps):
         start_time = time.perf_counter()
-        print("DEBUG:", dl_iter)
+        # print("DEBUG:", dl_iter)
         batch = next(dl_iter)
-        print("DEBUG: Batch keys", batch.keys())
-        print("DEBUG: Batch", batch)
+        # print("DEBUG: Batch keys", batch.keys())
+        print("DEBUG: Batch", batch["observation.images.front"])
         train_tracker.dataloading_s = time.perf_counter() - start_time
 
         for key in batch:
@@ -320,16 +320,70 @@ def train(cfg: TrainPipelineConfig):
             logging.info("Performing DRL step. Full PPO episode.")
             ppo_env = make_env(cfg.env)
             obs, info = ppo_env.reset()
+            ppo_env.render()
+            ppo_step = 0
+            timestamp = ppo_step / cfg.env.fps
             done = False
-            if not done:
-                action = policy.select_action()
-                # TODO: Create a small batch of 1 to pass to the policy, hopefully this results in only an action chunk of size 1 and not 50.
+            norm_obs = obs/255.0
+            # print("DEBUG:", norm_obs)
+            batch = {
+                    "observation.images.front": torch.tensor(norm_obs).unsqueeze(0).to(device).permute(0,3,1,2),
+                    "action": torch.zeros((1, ppo_env.action_space.shape[0])).unsqueeze(0).to(device),
+                    "observation.state": torch.zeros((1,ppo_env.action_space.shape[0])).unsqueeze(0).to(device),
+                    "timestamp": torch.tensor(timestamp).unsqueeze(0).unsqueeze(0).to(device),
+                    "frame_index": torch.tensor(ppo_step).unsqueeze(0).unsqueeze(0).to(device),
+                    "episode_index": torch.tensor(0).unsqueeze(0).unsqueeze(0).to(device),
+                    "index": torch.tensor(ppo_step).unsqueeze(0).unsqueeze(0).to(device),
+                    "task_index": torch.tensor(0).unsqueeze(0).unsqueeze(0).to(device),
+                    "action_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
+                    "observation.state_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
+                    "observation.images.front_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
+                    "task": ["Drive on the road."],
+                }
+            # print("DEBUG:", batch)
+            # print("DEBUG:", batch["observation.images.front"].size())
+            while not done:
+                print("DEBUG: PPO step start", ppo_step)
+                action = policy.select_action(batch)
+                print("DEBUG: PPO action", action)
+                # TODO: Fix mask calculation
                 # TODO: Calculate log_prob etc. for PPO
                 # TODO: Store transition in replay buffer
                 # TODO: Perform PPO update steps
-                print("DEBUG: PPO action selected", action)
-                obs, reward, terminated, truncated, info = ppo_env.step(action)
-                print("DEBUG: PPO env step", obs, reward, terminated, truncated, info)
+                # print("DEBUG: PPO action selected", action)
+                # print("DEBUG: PPO action selected size", action.size())
+                np_action = action.squeeze(0).cpu().numpy()
+                obs, reward, terminated, truncated, info = ppo_env.step(np_action)
+                ppo_env.render()
+                prev_action = batch["action"]
+                prev_obs = batch["observation.images.front"]
+                ppo_step += 1
+                print("DEBUG: PPO step", ppo_step)
+                timestamp = ppo_step / cfg.env.fps
+                norm_obs = obs/255.0
+                batch = {
+                    "observation.images.front": torch.tensor(norm_obs).unsqueeze(0).to(device).permute(0,3,1,2),
+                    "action": action.detach().clone(),
+                    "observation.state": prev_action.detach().clone(),  # just a placeholder
+                    "timestamp": torch.tensor(timestamp).unsqueeze(0).unsqueeze(0).to(device),
+                    "frame_index": torch.tensor(ppo_step).unsqueeze(0).unsqueeze(0).to(device),
+                    "episode_index": torch.tensor(0).unsqueeze(0).unsqueeze(0).to(device),
+                    "index": torch.tensor(ppo_step).unsqueeze(0).unsqueeze(0).to(device),
+                    "task_index": torch.tensor(0).unsqueeze(0).unsqueeze(0).to(device),
+                    "action_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
+                    "observation.state_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
+                    "observation.images.front_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
+                    "task": ["Drive on the road."],
+                }
+                transition = {"state": {"observation.images.front": prev_obs},
+                              "action": action,
+                              "reward": reward,
+                              "next_state": {"observation.images.front": batch["observation.images.front"]},
+                              "done": terminated,
+                              "truncated": truncated,
+                             }
+                replay_buffer.add(**transition)
+                policy.forward(batch)  # to potentially update internal buffers
                 done = terminated or truncated  
             print("DEBUG: PPO episode done", done)
             
@@ -344,7 +398,50 @@ def train(cfg: TrainPipelineConfig):
     if cfg.policy.push_to_hub:
         policy.push_model_to_hub(cfg)
 
+def calc_PPO_stats(batch, model_outputs, old_log_probs, new_log_probs, advantages, values, losses, optimizer):
+    """
+    Calculate key PPO statistics for logging and analysis.
+    TODO: Fill in with your actual variable names and logic.
+    """
+    # Policy loss and value loss (from your loss calculation)
+    policy_loss = losses["policy"]  # TODO: replace with your actual value
+    value_loss = losses["value"]    # TODO: replace with your actual value
 
+    # Entropy (for exploration)
+    entropy = model_outputs["entropy"].mean().item()  # TODO: replace with your actual value
+
+    # KL divergence between old and new policy
+    kl_div = (old_log_probs - new_log_probs).mean().item()
+
+    # Clip fraction (fraction of updates where PPO objective is clipped)
+    clip_fraction = ((torch.abs(new_log_probs - old_log_probs) > 0.2).float().mean().item())  # TODO: adjust threshold
+
+    # Average reward and episode length
+    avg_reward = batch["rewards"].mean().item()
+    episode_length = batch["lengths"].mean().item()  # if available
+
+    # Advantage statistics
+    advantage_mean = advantages.mean().item()
+    advantage_std = advantages.std().item()
+
+    # Learning rate and gradient norm
+    learning_rate = optimizer.param_groups[0]["lr"]
+    grad_norm = torch.nn.utils.clip_grad_norm_(model_outputs["params"], max_norm=0.5).item()  # TODO: adjust max_norm
+
+    return {
+        "policy_loss": policy_loss,
+        "value_loss": value_loss,
+        "entropy": entropy,
+        "kl_divergence": kl_div,
+        "clip_fraction": clip_fraction,
+        "avg_reward": avg_reward,
+        "episode_length": episode_length,
+        "advantage_mean": advantage_mean,
+        "advantage_std": advantage_std,
+        "learning_rate": learning_rate,
+        "grad_norm": grad_norm,
+    }
+    
 
 def main():
     init_logging()
