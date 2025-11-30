@@ -235,86 +235,8 @@ def train(cfg: TrainPipelineConfig):
     print("[DEBUG] Starting training loop")
     logging.info("Start offline training on a fixed dataset")
     for _ in range(step, cfg.steps):
-        start_time = time.perf_counter()
-        # print("DEBUG:", dl_iter)
-        batch = next(dl_iter)
-        # print("DEBUG: Batch keys", batch.keys())
-        print("DEBUG: Batch", batch["observation.images.front"])
-        train_tracker.dataloading_s = time.perf_counter() - start_time
-
-        for key in batch:
-            if isinstance(batch[key], torch.Tensor):
-                batch[key] = batch[key].to(device, non_blocking=device.type == "cuda")
-
-        train_tracker, output_dict = update_policy(
-            train_tracker,
-            policy,
-            batch,
-            optimizer,
-            cfg.optimizer.grad_clip_norm,
-            grad_scaler=grad_scaler,
-            lr_scheduler=lr_scheduler,
-            use_amp=cfg.policy.use_amp,
-        )
-
-        # Note: eval and checkpoint happens *after* the `step`th training update has completed, so we
-        # increment `step` here.
-        step += 1
-        train_tracker.step()
-        is_log_step = cfg.log_freq > 0 and step % cfg.log_freq == 0
-        is_saving_step = step % cfg.save_freq == 0 or step == cfg.steps
-        is_eval_step = cfg.eval_freq > 0 and step % cfg.eval_freq == 0
+        
         is_DRL_step = cfg.DRL_freq > 0 and step % cfg.DRL_freq == 0
-
-        if is_log_step:
-            logging.info(train_tracker)
-            if wandb_logger:
-                wandb_log_dict = train_tracker.to_dict()
-                if output_dict:
-                    wandb_log_dict.update(output_dict)
-                wandb_logger.log_dict(wandb_log_dict, step)
-            train_tracker.reset_averages()
-
-        if cfg.save_checkpoint and is_saving_step:
-            logging.info(f"Checkpoint policy after step {step}")
-            checkpoint_dir = get_step_checkpoint_dir(cfg.output_dir, cfg.steps, step)
-            save_checkpoint(checkpoint_dir, step, cfg, policy, optimizer, lr_scheduler)
-            update_last_checkpoint(checkpoint_dir)
-            if wandb_logger:
-                wandb_logger.log_policy(checkpoint_dir)
-
-        if cfg.env and is_eval_step:
-            step_id = get_step_identifier(step, cfg.steps)
-            logging.info(f"Eval policy at step {step}")
-            with (
-                torch.no_grad(),
-                torch.autocast(device_type=device.type) if cfg.policy.use_amp else nullcontext(),
-            ):
-                eval_info = eval_policy(
-                    eval_env,
-                    policy,
-                    cfg.eval.n_episodes,
-                    videos_dir=cfg.output_dir / "eval" / f"videos_step_{step_id}",
-                    max_episodes_rendered=4,
-                    start_seed=cfg.seed,
-                )
-
-            eval_metrics = {
-                "avg_sum_reward": AverageMeter("∑rwrd", ":.3f"),
-                "pc_success": AverageMeter("success", ":.1f"),
-                "eval_s": AverageMeter("eval_s", ":.3f"),
-            }
-            eval_tracker = MetricsTracker(
-                cfg.batch_size, dataset.num_frames, dataset.num_episodes, eval_metrics, initial_step=step
-            )
-            eval_tracker.eval_s = eval_info["aggregated"].pop("eval_s")
-            eval_tracker.avg_sum_reward = eval_info["aggregated"].pop("avg_sum_reward")
-            eval_tracker.pc_success = eval_info["aggregated"].pop("pc_success")
-            logging.info(eval_tracker)
-            if wandb_logger:
-                wandb_log_dict = {**eval_tracker.to_dict(), **eval_info}
-                wandb_logger.log_dict(wandb_log_dict, step, mode="eval")
-                wandb_logger.log_video(eval_info["video_paths"][0], step, mode="eval")
 
         if is_DRL_step:
             logging.info("Performing DRL step. Full PPO episode.")
@@ -383,9 +305,94 @@ def train(cfg: TrainPipelineConfig):
                               "truncated": truncated,
                              }
                 replay_buffer.add(**transition)
+                print("DEBUG: before policy forward")
                 policy.forward(batch)  # to potentially update internal buffers
+                print("DEBUG: after policy forward")
                 done = terminated or truncated  
             print("DEBUG: PPO episode done", done)
+            continue
+
+        start_time = time.perf_counter()
+        # print("DEBUG:", dl_iter)
+        batch = next(dl_iter)
+        # print("DEBUG: Batch keys", batch.keys())
+        print("DEBUG: Batch", batch["observation.images.front"])
+        train_tracker.dataloading_s = time.perf_counter() - start_time
+
+        for key in batch:
+            if isinstance(batch[key], torch.Tensor):
+                batch[key] = batch[key].to(device, non_blocking=device.type == "cuda")
+
+        train_tracker, output_dict = update_policy(
+            train_tracker,
+            policy,
+            batch,
+            optimizer,
+            cfg.optimizer.grad_clip_norm,
+            grad_scaler=grad_scaler,
+            lr_scheduler=lr_scheduler,
+            use_amp=cfg.policy.use_amp,
+        )
+
+        # Note: eval and checkpoint happens *after* the `step`th training update has completed, so we
+        # increment `step` here.
+        step += 1
+        train_tracker.step()
+        is_log_step = cfg.log_freq > 0 and step % cfg.log_freq == 0
+        is_saving_step = step % cfg.save_freq == 0 or step == cfg.steps
+        is_eval_step = cfg.eval_freq > 0 and step % cfg.eval_freq == 0
+
+        if is_log_step:
+            logging.info(train_tracker)
+            if wandb_logger:
+                wandb_log_dict = train_tracker.to_dict()
+                if output_dict:
+                    wandb_log_dict.update(output_dict)
+                wandb_logger.log_dict(wandb_log_dict, step)
+            train_tracker.reset_averages()
+
+        if cfg.save_checkpoint and is_saving_step:
+            logging.info(f"Checkpoint policy after step {step}")
+            checkpoint_dir = get_step_checkpoint_dir(cfg.output_dir, cfg.steps, step)
+            save_checkpoint(checkpoint_dir, step, cfg, policy, optimizer, lr_scheduler)
+            update_last_checkpoint(checkpoint_dir)
+            if wandb_logger:
+                wandb_logger.log_policy(checkpoint_dir)
+
+        if cfg.env and is_eval_step:
+            step_id = get_step_identifier(step, cfg.steps)
+            logging.info(f"Eval policy at step {step}")
+            with (
+                torch.no_grad(),
+                torch.autocast(device_type=device.type) if cfg.policy.use_amp else nullcontext(),
+            ):
+                eval_info = eval_policy(
+                    eval_env,
+                    policy,
+                    cfg.eval.n_episodes,
+                    videos_dir=cfg.output_dir / "eval" / f"videos_step_{step_id}",
+                    max_episodes_rendered=4,
+                    start_seed=cfg.seed,
+                )
+
+            eval_metrics = {
+                "avg_sum_reward": AverageMeter("∑rwrd", ":.3f"),
+                "pc_success": AverageMeter("success", ":.1f"),
+                "eval_s": AverageMeter("eval_s", ":.3f"),
+            }
+            eval_tracker = MetricsTracker(
+                cfg.batch_size, dataset.num_frames, dataset.num_episodes, eval_metrics, initial_step=step
+            )
+            eval_tracker.eval_s = eval_info["aggregated"].pop("eval_s")
+            eval_tracker.avg_sum_reward = eval_info["aggregated"].pop("avg_sum_reward")
+            eval_tracker.pc_success = eval_info["aggregated"].pop("pc_success")
+            logging.info(eval_tracker)
+            if wandb_logger:
+                wandb_log_dict = {**eval_tracker.to_dict(), **eval_info}
+                wandb_logger.log_dict(wandb_log_dict, step, mode="eval")
+                wandb_logger.log_video(eval_info["video_paths"][0], step, mode="eval")
+
+        
             
             
             episode_rewards = []

@@ -221,7 +221,7 @@ def make_att_2d_masks(pad_masks, att_masks):
         raise ValueError(att_masks.ndim)
     if pad_masks.ndim != 2:
         raise ValueError(pad_masks.ndim)
-
+    print("DEBUG: creating 2d attn masks")
     cumsum = torch.cumsum(att_masks, dim=1)
     att_2d_masks = cumsum[:, None, :] <= cumsum[:, :, None]
     pad_2d_masks = pad_masks[:, None, :] * pad_masks[:, :, None]
@@ -437,15 +437,15 @@ class SmolVLAPolicy(PreTrainedPolicy):
         queue is empty.
         """
         self.eval()
-        print("DEBUG:", batch)
+        # print("DEBUG:", batch)
         batch = self._prepare_batch(batch)
-        print("DEBUG: after prepare batch", batch)
+        # print("DEBUG: after prepare batch", batch)
         self._queues = populate_queues(self._queues, batch, exclude_keys=[ACTION])
         # Action queue logic for n_action_steps > 1. When the action_queue is depleted, populate it by
         # querying the policy.
         if len(self._queues[ACTION]) == 0:
             actions = self._get_action_chunk(batch, noise)
-            print("DEBUG: actions from chunk", len(actions))
+            # print("DEBUG: actions from chunk", len(actions))
             # `self.predict_action_chunk` returns a (batch_size, n_action_steps, action_dim) tensor, but the queue
             # effectively has shape (n_action_steps, batch_size, *), hence the transpose.
             self._queues[ACTION].extend(actions.transpose(0, 1)[: self.config.n_action_steps])
@@ -466,7 +466,9 @@ class SmolVLAPolicy(PreTrainedPolicy):
         actions_is_pad = batch.get("actions_id_pad")
         loss_dict = {}
         print("DEBUG:", images[0].shape, img_masks[0].shape, lang_tokens.shape, lang_masks.shape, state.shape, actions.shape)
+        print("DEBUG: forward pass inputs prepared")
         losses = self.model.forward(images, img_masks, lang_tokens, lang_masks, state, actions, noise, time)
+        print("DEBUG: forward pass losses computed")
         loss_dict["losses_after_forward"] = losses.clone()
 
         if actions_is_pad is not None:
@@ -850,11 +852,13 @@ class VLAFlowMatching(nn.Module):
         prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
             images, img_masks, lang_tokens, lang_masks, state=state
         )
+        print("DEBUG: prefix", prefix_embs.shape, prefix_pad_masks.shape, prefix_att_masks.shape)
         suffix_embs, suffix_pad_masks, suffix_att_masks = self.embed_suffix(x_t, time)
+        print("DEBUG: suffix", suffix_embs.shape, suffix_pad_masks.shape, suffix_att_masks.shape)
 
         pad_masks = torch.cat([prefix_pad_masks, suffix_pad_masks], dim=1)
         att_masks = torch.cat([prefix_att_masks, suffix_att_masks], dim=1)
-
+        print("DEBUG: calc masks")
         print("DEBUG: pad_masks shape", pad_masks.shape)
         print("DEBUG: att_masks shape", att_masks.shape)
 
@@ -887,6 +891,8 @@ class VLAFlowMatching(nn.Module):
         prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
             images, img_masks, lang_tokens, lang_masks, state=state
         )
+        print("DEBUG:", prefix_embs.shape, prefix_pad_masks.shape, prefix_att_masks.shape)
+        print("DEBUG: compute masks in sample_actions")
         prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
         prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
         # Compute image and language key value cache
@@ -930,7 +936,7 @@ class VLAFlowMatching(nn.Module):
         batch_size = prefix_pad_masks.shape[0]
         prefix_len = prefix_pad_masks.shape[1]
         prefix_pad_2d_masks = prefix_pad_masks[:, None, :].expand(batch_size, suffix_len, prefix_len)
-
+        print("DEBUG: compute masks in denoise_step")
         suffix_att_2d_masks = make_att_2d_masks(suffix_pad_masks, suffix_att_masks)
 
         full_att_2d_masks = torch.cat([prefix_pad_2d_masks, suffix_att_2d_masks], dim=2)
