@@ -828,7 +828,8 @@ class VLAFlowMatching(nn.Module):
         pad_masks.append(action_time_mask)
 
         # Set attention masks so that image, language and state inputs do not attend to action tokens
-        # TODO: make check for when to use which attention mask calculation
+        # TODO: make check for when to use which attention mask calculation!!!!!!
+        # TODO: NEXT THIS!!!!!!
         att_masks += [1] * self.config.chunk_size
         # att_masks += [1]
         embs = torch.cat(embs, dim=1)
