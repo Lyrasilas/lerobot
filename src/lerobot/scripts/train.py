@@ -80,6 +80,7 @@ def update_policy(
     device = get_device_from_parameters(policy)
     policy.train()
     with torch.autocast(device_type=device.type) if use_amp else nullcontext():
+        print("DEBUG: batch action size", batch["action"].shape)
         loss, output_dict = policy.forward(batch)
         # TODO(rcadene): policy.unnormalize_outputs(out_dict)
     # print("DEBUG: look at output_dict to potentially put into replay buffer", output_dict)
@@ -236,7 +237,8 @@ def train(cfg: TrainPipelineConfig):
     logging.info("Start offline training on a fixed dataset")
     for _ in range(step, cfg.steps):
         
-        is_DRL_step = cfg.DRL_freq > 0 and step % cfg.DRL_freq == 0
+        is_DRL_step = cfg.DRL_freq > 0 and step > 0 and  step % cfg.DRL_freq == 0
+        # is_DRL_step = cfg.DRL_freq > 0 and step % cfg.DRL_freq == 0
 
         if is_DRL_step:
             logging.info("Performing DRL step. Full PPO episode.")
@@ -262,25 +264,22 @@ def train(cfg: TrainPipelineConfig):
                     "observation.images.front_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
                     "task": ["Drive on the road."],
                 }
-            # print("DEBUG:", batch)
-            # print("DEBUG:", batch["observation.images.front"].size())
+
             while not done:
                 print("DEBUG: PPO step start", ppo_step)
                 action = policy.select_action(batch)
-                print("DEBUG: PPO action", action)
                 # TODO: Fix mask calculation
                 # TODO: Calculate log_prob etc. for PPO
                 # TODO: Store transition in replay buffer
                 # TODO: Perform PPO update steps
-                # print("DEBUG: PPO action selected", action)
-                # print("DEBUG: PPO action selected size", action.size())
+
                 np_action = action.squeeze(0).cpu().numpy()
                 obs, reward, terminated, truncated, info = ppo_env.step(np_action)
                 ppo_env.render()
-                prev_action = batch["action"]
+                action = action.unsqueeze(0)
+                prev_action = batch["action"].unsqueeze(0)
                 prev_obs = batch["observation.images.front"]
                 ppo_step += 1
-                print("DEBUG: PPO step", ppo_step)
                 timestamp = ppo_step / cfg.env.fps
                 norm_obs = obs/255.0
                 batch = {
@@ -297,26 +296,24 @@ def train(cfg: TrainPipelineConfig):
                     "observation.images.front_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
                     "task": ["Drive on the road."],
                 }
+
                 transition = {"state": {"observation.images.front": prev_obs},
                               "action": action,
                               "reward": reward,
                               "next_state": {"observation.images.front": batch["observation.images.front"]},
                               "done": terminated,
                               "truncated": truncated,
+                            #   "log_prob": log_prob,
                              }
                 replay_buffer.add(**transition)
-                print("DEBUG: before policy forward")
+                print("DEBUG: Before forward PPO --------------------------")
                 policy.forward(batch)  # to potentially update internal buffers
-                print("DEBUG: after policy forward")
                 done = terminated or truncated  
             print("DEBUG: PPO episode done", done)
             continue
 
         start_time = time.perf_counter()
-        # print("DEBUG:", dl_iter)
         batch = next(dl_iter)
-        # print("DEBUG: Batch keys", batch.keys())
-        print("DEBUG: Batch", batch["observation.images.front"])
         train_tracker.dataloading_s = time.perf_counter() - start_time
 
         for key in batch:

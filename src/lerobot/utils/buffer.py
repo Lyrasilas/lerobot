@@ -160,6 +160,7 @@ class ReplayBuffer:
 
         self.dones = torch.empty((self.capacity,), dtype=torch.bool, device=self.storage_device)
         self.truncateds = torch.empty((self.capacity,), dtype=torch.bool, device=self.storage_device)
+        self.log_probs = torch.empty((self.capacity,), dtype=torch.float32, device=self.storage_device)
 
         # Initialize storage for complementary_info
         self.has_complementary_info = complementary_info is not None
@@ -195,6 +196,7 @@ class ReplayBuffer:
         done: bool,
         truncated: bool,
         complementary_info: dict[str, torch.Tensor] | None = None,
+        log_prob: float | None = None,
     ):
         """Saves a transition, ensuring tensors are stored on the designated storage device."""
         # Initialize storage if this is the first transition
@@ -213,6 +215,7 @@ class ReplayBuffer:
         self.rewards[self.position] = reward
         self.dones[self.position] = done
         self.truncateds[self.position] = truncated
+        self.log_probs[self.position] = log_prob if log_prob is not None else 0.0
 
         # Handle complementary_info if provided and storage is initialized
         if complementary_info is not None and self.has_complementary_info:
