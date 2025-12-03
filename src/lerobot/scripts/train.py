@@ -80,8 +80,8 @@ def update_policy(
     device = get_device_from_parameters(policy)
     policy.train()
     with torch.autocast(device_type=device.type) if use_amp else nullcontext():
-        print("DEBUG: batch action size", batch["action"].shape)
-        loss, output_dict = policy.forward(batch)
+        # print("DEBUG: batch action size", batch["action"].shape)
+        loss, output_dict, _, _ = policy.forward(batch)
         # TODO(rcadene): policy.unnormalize_outputs(out_dict)
     # print("DEBUG: look at output_dict to potentially put into replay buffer", output_dict)
     grad_scaler.scale(loss).backward()
@@ -267,7 +267,24 @@ def train(cfg: TrainPipelineConfig):
 
             while not done:
                 print("DEBUG: PPO step start", ppo_step)
-                action = policy.select_action(batch)
+                # get action distributions for further calcs
+                dists = policy.get_action_distributions(batch)
+                # sample action
+                raw_action = dists.rsample()
+                # map action to environment friendly range of [(-1,1),(0,1),(0,1)]
+                action = torch.zeros(batch["action"].size())
+                action[..., 0] = torch.tanh(raw_action[..., 0])
+                action[..., 1:] = torch.sigmoid(raw_action[..., 1:])
+                # calculate log_probs
+                log_probs = dists.log_prob(raw_action)
+                # mappings for log_probs and their use
+                tanh_jacobian = torch.log(1 - action[..., 0]**2 + 1e-6)
+                sigmoid_jacobian = action[..., 1:].log() + (1- action[..., 1:]).log()
+                log_probs[..., 0] -= tanh_jacobian
+                log_probs[..., 1:] -= sigmoid_jacobian
+                # sum to one log_prob
+                log_prob = log_probs.sum(-1)  # maybe change for larger batches
+                print("DEBUG: log_probs shape", log_prob.shape)
                 # TODO: Fix mask calculation
                 # TODO: Calculate log_prob etc. for PPO
                 # TODO: Store transition in replay buffer
@@ -303,10 +320,13 @@ def train(cfg: TrainPipelineConfig):
                               "next_state": {"observation.images.front": batch["observation.images.front"]},
                               "done": terminated,
                               "truncated": truncated,
-                            #   "log_prob": log_prob,
+                              "log_prob": log_prob,
                              }
                 replay_buffer.add(**transition)
                 print("DEBUG: Before forward PPO --------------------------")
+                sample = replay_buffer.sample(cfg.batch_size)
+                advantages = compute_gae()
+                
                 policy.forward(batch)  # to potentially update internal buffers
                 done = terminated or truncated  
             print("DEBUG: PPO episode done", done)
@@ -402,49 +422,28 @@ def train(cfg: TrainPipelineConfig):
     if cfg.policy.push_to_hub:
         policy.push_model_to_hub(cfg)
 
-def calc_PPO_stats(batch, model_outputs, old_log_probs, new_log_probs, advantages, values, losses, optimizer):
+def compute_gae(rewards, values, dones, next_value, gamma=0.99, lam=0.95):
     """
-    Calculate key PPO statistics for logging and analysis.
-    TODO: Fill in with your actual variable names and logic.
+    Compute Generalized Advantage Estimation (GAE).
+    rewards: [T]
+    values: [T]
+    dones: [T]
+    next_value: scalar
+    Returns: advantages [T]
     """
-    # Policy loss and value loss (from your loss calculation)
-    policy_loss = losses["policy"]  # TODO: replace with your actual value
-    value_loss = losses["value"]    # TODO: replace with your actual value
-
-    # Entropy (for exploration)
-    entropy = model_outputs["entropy"].mean().item()  # TODO: replace with your actual value
-
-    # KL divergence between old and new policy
-    kl_div = (old_log_probs - new_log_probs).mean().item()
-
-    # Clip fraction (fraction of updates where PPO objective is clipped)
-    clip_fraction = ((torch.abs(new_log_probs - old_log_probs) > 0.2).float().mean().item())  # TODO: adjust threshold
-
-    # Average reward and episode length
-    avg_reward = batch["rewards"].mean().item()
-    episode_length = batch["lengths"].mean().item()  # if available
-
-    # Advantage statistics
-    advantage_mean = advantages.mean().item()
-    advantage_std = advantages.std().item()
-
-    # Learning rate and gradient norm
-    learning_rate = optimizer.param_groups[0]["lr"]
-    grad_norm = torch.nn.utils.clip_grad_norm_(model_outputs["params"], max_norm=0.5).item()  # TODO: adjust max_norm
-
-    return {
-        "policy_loss": policy_loss,
-        "value_loss": value_loss,
-        "entropy": entropy,
-        "kl_divergence": kl_div,
-        "clip_fraction": clip_fraction,
-        "avg_reward": avg_reward,
-        "episode_length": episode_length,
-        "advantage_mean": advantage_mean,
-        "advantage_std": advantage_std,
-        "learning_rate": learning_rate,
-        "grad_norm": grad_norm,
-    }
+    T = len(rewards)
+    advantages = torch.zeros(T)
+    gae = 0
+    for t in reversed(range(T)):
+        # delta = r_t + gamma * V_{t+1} * (1 - done_t) - V_t
+        if t == T - 1:
+            next_v = next_value
+        else:
+            next_v = values[t + 1]
+        delta = rewards[t] + gamma * next_v * (1 - dones[t]) - values[t]
+        gae = delta + gamma * lam * (1 - dones[t]) * gae
+        advantages[t] = gae
+    return advantages
     
 
 def main():

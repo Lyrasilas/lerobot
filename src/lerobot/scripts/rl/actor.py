@@ -586,7 +586,7 @@ def transitions_stream(shutdown_event: Event, transitions_queue: Queue, timeout:
 
 
 def interactions_stream(
-    shutdown_event: Event,
+    shutdown_event: Event, # type: ignore
     interactions_queue: Queue,
     timeout: float,  # type: ignore
 ) -> services_pb2.Empty:

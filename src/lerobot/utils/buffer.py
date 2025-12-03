@@ -287,6 +287,7 @@ class ReplayBuffer:
         batch_rewards = self.rewards[idx].to(self.device)
         batch_dones = self.dones[idx].to(self.device).float()
         batch_truncateds = self.truncateds[idx].to(self.device).float()
+        batch_log_probs = self.log_probs[idx].to(self.device)
 
         # Sample complementary_info if available
         batch_complementary_info = None
@@ -302,6 +303,7 @@ class ReplayBuffer:
             next_state=batch_next_state,
             done=batch_dones,
             truncated=batch_truncateds,
+            log_probs=batch_log_probs,
             complementary_info=batch_complementary_info,
         )
 
