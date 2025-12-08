@@ -62,7 +62,7 @@ from lerobot.utils.utils import (
     init_logging,
 )
 from lerobot.utils.wandb_utils import WandBLogger
-from lerobot.utils.buffer import ReplayBuffer
+from lerobot.utils.buffer import RolloutBufferTorch
 
 
 def update_policy(
@@ -81,7 +81,7 @@ def update_policy(
     policy.train()
     with torch.autocast(device_type=device.type) if use_amp else nullcontext():
         # print("DEBUG: batch action size", batch["action"].shape)
-        loss, output_dict, _, _ = policy.forward(batch)
+        loss, output_dict, _, _, _ = policy.forward(batch)
         # TODO(rcadene): policy.unnormalize_outputs(out_dict)
     # print("DEBUG: look at output_dict to potentially put into replay buffer", output_dict)
     grad_scaler.scale(loss).backward()
@@ -141,12 +141,14 @@ def train(cfg: TrainPipelineConfig):
 
     logging.info("Creating dataset")
     dataset = make_dataset(cfg)
-
-    logging.info("Creating replay buffer")
-    replay_keys = [
-        "observation.images.front",
-    ]
-    replay_buffer = ReplayBuffer(capacity=cfg.replay_capacity, device=device, state_keys=replay_keys)
+    
+    logging.info("Creating rollout buffer")
+    rollout_buffer = RolloutBufferTorch(
+        buffer_size=cfg.replay_capacity,
+        obs_shape=dataset.features["observation.images.front"]["shape"],
+        action_shape=dataset.features["action"]["shape"],
+        device=device.type,
+    )
 
     # Create environment used for evaluating checkpoints during training on simulation data.
     # On real-world data, no need to create an environment as evaluations are done outside train.py,
@@ -244,6 +246,8 @@ def train(cfg: TrainPipelineConfig):
             logging.info("Performing DRL step. Full PPO episode.")
             ppo_env = make_env(cfg.env)
             obs, info = ppo_env.reset()
+            obs = obs[:168, ...]
+
             ppo_env.render()
             ppo_step = 0
             timestamp = ppo_step / cfg.env.fps
@@ -268,7 +272,7 @@ def train(cfg: TrainPipelineConfig):
             while not done:
                 print("DEBUG: PPO step start", ppo_step)
                 # get action distributions for further calcs
-                dists = policy.get_action_distributions(batch)
+                dists, value = policy.get_action_distributions(batch)
                 # sample action
                 raw_action = dists.rsample()
                 # map action to environment friendly range of [(-1,1),(0,1),(0,1)]
@@ -280,6 +284,8 @@ def train(cfg: TrainPipelineConfig):
                 # mappings for log_probs and their use
                 tanh_jacobian = torch.log(1 - action[..., 0]**2 + 1e-6)
                 sigmoid_jacobian = action[..., 1:].log() + (1- action[..., 1:]).log()
+                tanh_jacobian = tanh_jacobian.to(device)
+                sigmoid_jacobian = sigmoid_jacobian.to(device)
                 log_probs[..., 0] -= tanh_jacobian
                 log_probs[..., 1:] -= sigmoid_jacobian
                 # sum to one log_prob
@@ -290,8 +296,10 @@ def train(cfg: TrainPipelineConfig):
                 # TODO: Store transition in replay buffer
                 # TODO: Perform PPO update steps
 
-                np_action = action.squeeze(0).cpu().numpy()
+                np_action = action.squeeze(0).squeeze(0).detach().numpy()
+                print("DEBUG: Step action", np_action)
                 obs, reward, terminated, truncated, info = ppo_env.step(np_action)
+                obs = obs[:168, ...]
                 ppo_env.render()
                 action = action.unsqueeze(0)
                 prev_action = batch["action"].unsqueeze(0)
@@ -313,21 +321,52 @@ def train(cfg: TrainPipelineConfig):
                     "observation.images.front_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
                     "task": ["Drive on the road."],
                 }
-
-                transition = {"state": {"observation.images.front": prev_obs},
-                              "action": action,
+                transition = {"obs": prev_obs.permute(0,2,3,1).squeeze(0),
+                              "action": action.squeeze(0).squeeze(0).squeeze(0),
                               "reward": reward,
-                              "next_state": {"observation.images.front": batch["observation.images.front"]},
                               "done": terminated,
-                              "truncated": truncated,
                               "log_prob": log_prob,
+                              "value": value,
                              }
-                replay_buffer.add(**transition)
+                rollout_buffer.add(**transition)
                 print("DEBUG: Before forward PPO --------------------------")
-                sample = replay_buffer.sample(cfg.batch_size)
-                advantages = compute_gae()
-                
-                policy.forward(batch)  # to potentially update internal buffers
+                if rollout_buffer.ptr >= rollout_buffer.buffer_size:
+                    print("DEBUG: Performing PPO update from rollout buffer")
+                    # compute GAE advantages
+                    with torch.no_grad():
+                        next_value = policy.get_value(batch).squeeze(0)
+                    rewards = rollout_buffer.rewards
+                    values = rollout_buffer.values
+                    dones = rollout_buffer.dones
+                    advantages = compute_gae(rewards, values, dones, next_value)
+                    returns = advantages + values
+                    # Normalize advantages
+                    advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+                    # PPO update loop
+                    ppo_batch_size = 64
+                    ppo_epochs = 4
+                    for epoch in range(ppo_epochs):
+                        for start in range(0, rollout_buffer.buffer_size, ppo_batch_size):
+                            end = start + ppo_batch_size
+                            mbatch = rollout_buffer.get_batch(start, end)
+                            mbatch["advantages"] = advantages[start:end]
+                            mbatch["returns"] = returns[start:end]
+                            print("DEBUG: PPO minibatch from", start, "to", end)
+                            train_tracker, output_dict = update_policy(
+                                train_tracker,
+                                policy,
+                                mbatch,
+                                optimizer,
+                                cfg.optimizer.grad_clip_norm,
+                                grad_scaler=grad_scaler,
+                                lr_scheduler=lr_scheduler,
+                                use_amp=cfg.policy.use_amp,
+                            )
+                    rollout_buffer.reset()
+                print("DEBUG: After forward PPO --------------------------")
+
+                # policy.forward(batch)  # to potentially update internal buffers
                 done = terminated or truncated  
             print("DEBUG: PPO episode done", done)
             continue

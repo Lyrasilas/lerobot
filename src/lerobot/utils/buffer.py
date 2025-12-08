@@ -161,7 +161,7 @@ class ReplayBuffer:
         self.dones = torch.empty((self.capacity,), dtype=torch.bool, device=self.storage_device)
         self.truncateds = torch.empty((self.capacity,), dtype=torch.bool, device=self.storage_device)
         self.log_probs = torch.empty((self.capacity,), dtype=torch.float32, device=self.storage_device)
-
+        self.values = torch.empty((self.capacity,), dtype=torch.float32, device=self.storage_device)
         # Initialize storage for complementary_info
         self.has_complementary_info = complementary_info is not None
         self.complementary_info_keys = []
@@ -197,6 +197,7 @@ class ReplayBuffer:
         truncated: bool,
         complementary_info: dict[str, torch.Tensor] | None = None,
         log_prob: float | None = None,
+        value: float | None = None,
     ):
         """Saves a transition, ensuring tensors are stored on the designated storage device."""
         # Initialize storage if this is the first transition
@@ -216,6 +217,7 @@ class ReplayBuffer:
         self.dones[self.position] = done
         self.truncateds[self.position] = truncated
         self.log_probs[self.position] = log_prob if log_prob is not None else 0.0
+        self.values[self.position] = value if value is not None else 0.0
 
         # Handle complementary_info if provided and storage is initialized
         if complementary_info is not None and self.has_complementary_info:
@@ -288,6 +290,7 @@ class ReplayBuffer:
         batch_dones = self.dones[idx].to(self.device).float()
         batch_truncateds = self.truncateds[idx].to(self.device).float()
         batch_log_probs = self.log_probs[idx].to(self.device)
+        batch_values = self.values[idx].to(self.device)
 
         # Sample complementary_info if available
         batch_complementary_info = None
@@ -304,6 +307,7 @@ class ReplayBuffer:
             done=batch_dones,
             truncated=batch_truncateds,
             log_probs=batch_log_probs,
+            values=batch_values,
             complementary_info=batch_complementary_info,
         )
 
@@ -845,3 +849,39 @@ def concatenate_batch_transitions(
                     left_info[key] = right_info[key]
 
     return left_batch_transitions
+
+
+class RolloutBufferTorch:
+    def __init__(self, buffer_size, obs_shape, action_shape, device="cpu"):
+        self.device = device
+        self.buffer_size = buffer_size
+        self.obs = torch.zeros((buffer_size, *obs_shape), dtype=torch.float32, device=device)
+        self.actions = torch.zeros((buffer_size, *action_shape), dtype=torch.float32, device=device)
+        self.rewards = torch.zeros(buffer_size, dtype=torch.float32, device=device)
+        self.dones = torch.zeros(buffer_size, dtype=torch.bool, device=device)
+        self.values = torch.zeros(buffer_size, dtype=torch.float32, device=device)
+        self.log_probs = torch.zeros(buffer_size, dtype=torch.float32, device=device)
+        self.ptr = 0
+
+    def add(self, obs, action, reward, done, value, log_prob):
+        self.obs[self.ptr].copy_(obs)
+        self.actions[self.ptr].copy_(action)
+        self.rewards[self.ptr] = reward
+        self.dones[self.ptr] = done
+        self.values[self.ptr] = value
+        self.log_probs[self.ptr] = log_prob
+        self.ptr += 1
+
+    def reset(self):
+        self.ptr = 0
+
+    def get(self):
+        # Return all stored transitions up to ptr as tensors
+        return (
+            self.obs[:self.ptr],
+            self.actions[:self.ptr],
+            self.rewards[:self.ptr],
+            self.dones[:self.ptr],
+            self.values[:self.ptr],
+            self.log_probs[:self.ptr],
+        )

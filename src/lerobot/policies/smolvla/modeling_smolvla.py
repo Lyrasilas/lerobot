@@ -462,7 +462,7 @@ class SmolVLAPolicy(PreTrainedPolicy):
         # print("DEBUG: actions shape", actions.shape)
         
         loss_dict = {}
-        losses, mean, std = self.model.forward(images, img_masks, lang_tokens, lang_masks, state, actions, noise, time)
+        losses, mean, std, value = self.model.forward(images, img_masks, lang_tokens, lang_masks, state, actions, noise, time)
         loss_dict["losses_after_forward"] = losses.clone()
         
         if actions_is_pad is not None:
@@ -478,7 +478,7 @@ class SmolVLAPolicy(PreTrainedPolicy):
         loss = losses.mean()
         # For backward pass
         loss_dict["loss"] = loss.item()
-        return loss, loss_dict, mean, std
+        return loss, loss_dict, mean, std, value
 
     def prepare_images(self, batch):
         """Apply SmolVLA preprocessing to the images, like resizing to 224x224 and padding to keep aspect ratio, and
@@ -585,9 +585,13 @@ class SmolVLAPolicy(PreTrainedPolicy):
         return actions
     
     def get_action_distributions(self, batch):
-        _, _, mean, std = self.forward(batch)
+        _, _, mean, std, value = self.forward(batch)
         dists = torch.distributions.Normal(mean, std)
-        return dists
+        return dists, value
+    
+    def get_value(self, batch):
+        _, _, _, _, value = self.forward(batch)
+        return value
 
 
 def pad_tensor(tensor, max_len, pad_value=0):
@@ -663,6 +667,7 @@ class VLAFlowMatching(nn.Module):
         # New layers for action distribution prediction used in PPO
         self.actor_head_mean_proj = nn.Linear(self.vlm_with_expert.expert_hidden_size, self.config.max_action_dim)
         self.actor_head_logstd_proj = nn.Linear(self.vlm_with_expert.expert_hidden_size, self.config.max_action_dim)
+        self.actor_head_value_proj = nn.Linear(self.vlm_with_expert.expert_hidden_size, 1)
 
         self.action_time_mlp_in = nn.Linear(
             self.vlm_with_expert.expert_hidden_size * 2, self.vlm_with_expert.expert_hidden_size
@@ -889,10 +894,10 @@ class VLAFlowMatching(nn.Module):
         logstd = self.actor_head_logstd_proj(suffix_out)
         mean = mean[..., :3]
         logstd = logstd[..., :3]
-        
+        value = self.actor_head_value_proj(suffix_out)
         losses = F.mse_loss(u_t, v_t, reduction="none")
         std = torch.exp(logstd)
-        return losses, mean, std
+        return losses, mean, std, value
 
     def sample_actions(self, images, img_masks, lang_tokens, lang_masks, state, noise=None) -> Tensor:
         """Do a full inference forward and compute the action (batch_size x num_steps x num_motors)"""
