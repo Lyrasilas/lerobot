@@ -806,7 +806,7 @@ class VLAFlowMatching(nn.Module):
         embs = []
         pad_masks = []
         att_masks = []
-
+        
         # Fuse timestep + action information using an MLP
         # print("DEBUG: noisy_actions shape", noisy_actions.shape[1])
         action_emb = self.action_in_proj(noisy_actions)
@@ -822,7 +822,7 @@ class VLAFlowMatching(nn.Module):
             device=device,
         )
         time_emb = time_emb.type(dtype=dtype)
-
+        
         time_emb = time_emb[:, None, :].expand_as(action_emb)
         action_time_emb = torch.cat([action_emb, time_emb], dim=2)
 

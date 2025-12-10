@@ -1,3 +1,50 @@
+import gc
+import torch
+
+def get_cuda_tensor_ids():
+    return {id(obj): obj for obj in gc.get_objects() if torch.is_tensor(obj) and obj.is_cuda}
+
+def print_new_cuda_tensors(prev_tensors):
+    curr_tensors = get_cuda_tensor_ids()
+    new_ids = set(curr_tensors.keys()) - set(prev_tensors.keys())
+    print("New CUDA tensors added this step:")
+    for tid in new_ids:
+        t = curr_tensors[tid]
+        print(f"ID: {tid}, Tensor: {t.shape}, dtype: {t.dtype}, size: {t.element_size() * t.nelement() / 1024**2:.2f} MB, requires_grad: {t.requires_grad}")
+
+# Example usage in your training loop:
+# prev_tensors = get_cuda_tensor_ids()
+# ... training step ...
+# print_new_cuda_tensors(prev_tensors)
+import torch
+import gc
+# ...existing code...
+# After buffer/model creation, add memory usage reporting
+def report_gpu_memory(buffer=None):
+    print("Total GPU memory allocated:", torch.cuda.memory_allocated() / 1024**2, "MB")
+    print("Total GPU memory reserved:", torch.cuda.memory_reserved() / 1024**2, "MB")
+    for obj in gc.get_objects():
+        if torch.is_tensor(obj) and obj.is_cuda:
+            print(f"Tensor: {obj.shape}, dtype: {obj.dtype}, size: {obj.element_size() * obj.nelement() / 1024**2:.2f} MB")
+    if buffer is not None:
+        for name, tensor in buffer.__dict__.items():
+            if torch.is_tensor(tensor) and tensor.is_cuda:
+                print(f"Buffer field {name}: {tensor.shape}, {tensor.element_size() * tensor.nelement() / 1024**2:.2f} MB")
+
+import gc
+import torch
+
+def print_live_cuda_tensors():
+    print("Live CUDA tensors after step:")
+    for obj in gc.get_objects():
+        try:
+            if torch.is_tensor(obj) and obj.is_cuda:
+                print(f"Tensor: {obj.shape}, dtype: {obj.dtype}, size: {obj.element_size() * obj.nelement() / 1024**2:.2f} MB, requires_grad: {obj.requires_grad}")
+        except Exception:
+            pass
+
+# Example usage after buffer/model creation:
+# report_gpu_memory(buffer)
 #!/usr/bin/env python
 
 # Copyright 2024 The HuggingFace Inc. team. All rights reserved.
@@ -147,8 +194,9 @@ def train(cfg: TrainPipelineConfig):
         buffer_size=cfg.replay_capacity,
         obs_shape=dataset.features["observation.images.front"]["shape"],
         action_shape=dataset.features["action"]["shape"],
-        device=device.type,
+        device="cpu",
     )
+    print("rollout_buffer", rollout_buffer.device)
 
     # Create environment used for evaluating checkpoints during training on simulation data.
     # On real-world data, no need to create an environment as evaluations are done outside train.py,
@@ -238,15 +286,24 @@ def train(cfg: TrainPipelineConfig):
     print("[DEBUG] Starting training loop")
     logging.info("Start offline training on a fixed dataset")
     for _ in range(step, cfg.steps):
-        
+        # prev_tensors = get_cuda_tensor_ids()
+        # # ... your training step code ...
+        # # Existing code for training step goes here
+        # print_new_cuda_tensors(prev_tensors)
+        # # print_live_cuda_tensors()
+        # print("-----------------------------------------------------------------------------------------------------------")
         is_DRL_step = cfg.DRL_freq > 0 and step > 0 and  step % cfg.DRL_freq == 0
         # is_DRL_step = cfg.DRL_freq > 0 and step % cfg.DRL_freq == 0
 
         if is_DRL_step:
+            # # print_live_cuda_tensors()
+            # prev_tensors = get_cuda_tensor_ids()
+            # print_new_cuda_tensors(prev_tensors)
+            # print("------------------------------------------------DEBUG: IN DRL STEP ------------------------------------------------")
             logging.info("Performing DRL step. Full PPO episode.")
             ppo_env = make_env(cfg.env)
             obs, info = ppo_env.reset()
-            obs = obs[:168, ...]
+            # obs = obs[:168, ...]
 
             ppo_env.render()
             ppo_step = 0
@@ -270,6 +327,11 @@ def train(cfg: TrainPipelineConfig):
                 }
 
             while not done:
+                # # report_gpu_memory(rollout_buffer)
+                # print_new_cuda_tensors(prev_tensors)
+                # prev_tensors = get_cuda_tensor_ids()
+                # # print_live_cuda_tensors()
+                # print("------------------------------------------------DEBUG: PPO step------------------------------------------------")
                 print("DEBUG: PPO step start", ppo_step)
                 # get action distributions for further calcs
                 dists, value = policy.get_action_distributions(batch)
@@ -290,27 +352,39 @@ def train(cfg: TrainPipelineConfig):
                 log_probs[..., 1:] -= sigmoid_jacobian
                 # sum to one log_prob
                 log_prob = log_probs.sum(-1)  # maybe change for larger batches
-                print("DEBUG: log_probs shape", log_prob.shape)
                 # TODO: Fix mask calculation
                 # TODO: Calculate log_prob etc. for PPO
                 # TODO: Store transition in replay buffer
                 # TODO: Perform PPO update steps
 
                 np_action = action.squeeze(0).squeeze(0).detach().numpy()
-                print("DEBUG: Step action", np_action)
                 obs, reward, terminated, truncated, info = ppo_env.step(np_action)
-                obs = obs[:168, ...]
+                # obs = obs[:168, ...]
                 ppo_env.render()
-                action = action.unsqueeze(0)
+                # action = action.unsqueeze(0)
                 prev_action = batch["action"].unsqueeze(0)
                 prev_obs = batch["observation.images.front"]
                 ppo_step += 1
                 timestamp = ppo_step / cfg.env.fps
                 norm_obs = obs/255.0
+                # batch = {
+                #     "observation.images.front": torch.tensor(norm_obs).unsqueeze(0).to(device).permute(0,3,1,2),
+                #     "action": action.detach().clone().to(device),
+                #     "observation.state": prev_action.detach().clone().to(device),  # just a placeholder
+                #     "timestamp": torch.tensor(timestamp).unsqueeze(0).unsqueeze(0).to(device),
+                #     "frame_index": torch.tensor(ppo_step).unsqueeze(0).unsqueeze(0).to(device),
+                #     "episode_index": torch.tensor(0).unsqueeze(0).unsqueeze(0).to(device),
+                #     "index": torch.tensor(ppo_step).unsqueeze(0).unsqueeze(0).to(device),
+                #     "task_index": torch.tensor(0).unsqueeze(0).unsqueeze(0).to(device),
+                #     "action_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
+                #     "observation.state_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
+                #     "observation.images.front_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
+                #     "task": ["Drive on the road."],
+                # }
                 batch = {
                     "observation.images.front": torch.tensor(norm_obs).unsqueeze(0).to(device).permute(0,3,1,2),
-                    "action": action.detach().clone(),
-                    "observation.state": prev_action.detach().clone(),  # just a placeholder
+                    "action": action.detach().clone().to(device),
+                    "observation.state": prev_action.detach().clone().to(device),  # just a placeholder
                     "timestamp": torch.tensor(timestamp).unsqueeze(0).unsqueeze(0).to(device),
                     "frame_index": torch.tensor(ppo_step).unsqueeze(0).unsqueeze(0).to(device),
                     "episode_index": torch.tensor(0).unsqueeze(0).unsqueeze(0).to(device),
@@ -321,15 +395,16 @@ def train(cfg: TrainPipelineConfig):
                     "observation.images.front_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
                     "task": ["Drive on the road."],
                 }
-                transition = {"obs": prev_obs.permute(0,2,3,1).squeeze(0),
-                              "action": action.squeeze(0).squeeze(0).squeeze(0),
+                
+                transition = {
+                              "obs": prev_obs.permute(0,2,3,1).squeeze(0).detach().cpu(),
+                              "action": action.squeeze(0).squeeze(0).squeeze(0).detach().cpu(),
                               "reward": reward,
                               "done": terminated,
-                              "log_prob": log_prob,
-                              "value": value,
+                              "log_prob": log_prob.detach().cpu(),
+                              "value": value.detach().cpu(),
                              }
                 rollout_buffer.add(**transition)
-                print("DEBUG: Before forward PPO --------------------------")
                 if rollout_buffer.ptr >= rollout_buffer.buffer_size:
                     print("DEBUG: Performing PPO update from rollout buffer")
                     # compute GAE advantages
@@ -364,7 +439,6 @@ def train(cfg: TrainPipelineConfig):
                                 use_amp=cfg.policy.use_amp,
                             )
                     rollout_buffer.reset()
-                print("DEBUG: After forward PPO --------------------------")
 
                 # policy.forward(batch)  # to potentially update internal buffers
                 done = terminated or truncated  
@@ -471,6 +545,7 @@ def compute_gae(rewards, values, dones, next_value, gamma=0.99, lam=0.95):
     Returns: advantages [T]
     """
     T = len(rewards)
+    dones_f = dones.float()
     advantages = torch.zeros(T)
     gae = 0
     for t in reversed(range(T)):
@@ -479,8 +554,8 @@ def compute_gae(rewards, values, dones, next_value, gamma=0.99, lam=0.95):
             next_v = next_value
         else:
             next_v = values[t + 1]
-        delta = rewards[t] + gamma * next_v * (1 - dones[t]) - values[t]
-        gae = delta + gamma * lam * (1 - dones[t]) * gae
+        delta = rewards[t] + gamma * next_v * (1 - dones_f[t]) - values[t]
+        gae = delta + gamma * lam * (1 - dones_f[t]) * gae
         advantages[t] = gae
     return advantages
     

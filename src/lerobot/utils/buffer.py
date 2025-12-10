@@ -885,3 +885,20 @@ class RolloutBufferTorch:
             self.values[:self.ptr],
             self.log_probs[:self.ptr],
         )
+        
+    def get_batch(self, start: int, end: int):
+        """
+        Returns a minibatch as a dict for PPO update.
+        """
+        return {
+            "observation.images.front": self.obs[start:end],
+            "actions": self.actions[start:end],
+            "rewards": self.rewards[start:end],
+            "dones": self.dones[start:end],
+            "log_probs": self.log_probs[start:end],
+            "values": self.values[start:end],
+            # Add other fields as needed
+        }
+    
+    def size(self):
+        return self.ptr
