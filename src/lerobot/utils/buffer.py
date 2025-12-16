@@ -22,6 +22,7 @@ from typing import TypedDict
 import torch
 import torch.nn.functional as F  # noqa: N812
 from tqdm import tqdm
+import numpy as np
 
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.utils.transition import Transition
@@ -861,15 +862,33 @@ class RolloutBufferTorch:
         self.dones = torch.zeros(buffer_size, dtype=torch.bool, device=device)
         self.values = torch.zeros(buffer_size, dtype=torch.float32, device=device)
         self.log_probs = torch.zeros(buffer_size, dtype=torch.float32, device=device)
+        self.timestamps = torch.zeros(buffer_size, dtype=torch.float32, device=device)
+        self.frame_indexes = torch.zeros(buffer_size, dtype=torch.int64, device=device)
+        self.episode_indexes = torch.zeros(buffer_size, dtype=torch.int64, device=device)
+        self.indexes = torch.zeros(buffer_size, dtype=torch.int64, device=device)
+        self.task_indexes = torch.zeros(buffer_size, dtype=torch.int64, device=device)
+        self.action_is_pads = torch.zeros(buffer_size, dtype=torch.bool, device=device)
+        self.state_is_pads = torch.zeros(buffer_size, dtype=torch.bool, device=device)
+        self.image_is_pads = torch.zeros(buffer_size, dtype=torch.bool, device=device)
+        self.tasks = []
         self.ptr = 0
 
-    def add(self, obs, action, reward, done, value, log_prob):
+    def add(self, obs, action, reward, done, value, log_prob, timestamp, frame_index, episode_index, index, task_index, action_is_pad, state_is_pad, image_is_pad, task):
         self.obs[self.ptr].copy_(obs)
         self.actions[self.ptr].copy_(action)
         self.rewards[self.ptr] = reward
         self.dones[self.ptr] = done
         self.values[self.ptr] = value
         self.log_probs[self.ptr] = log_prob
+        self.timestamps[self.ptr] = timestamp
+        self.frame_indexes[self.ptr] = frame_index
+        self.episode_indexes[self.ptr] = episode_index
+        self.indexes[self.ptr] = index
+        self.task_indexes[self.ptr] = task_index
+        self.action_is_pads[self.ptr] = action_is_pad
+        self.state_is_pads[self.ptr] = state_is_pad
+        self.image_is_pads[self.ptr] = image_is_pad
+        self.tasks.append(task)
         self.ptr += 1
 
     def reset(self):
@@ -884,19 +903,58 @@ class RolloutBufferTorch:
             self.dones[:self.ptr],
             self.values[:self.ptr],
             self.log_probs[:self.ptr],
+            self.timestamps[:self.ptr],
+            self.frame_indexes[:self.ptr],
+            self.episode_indexes[:self.ptr],
+            self.indexes[:self.ptr],
+            self.task_indexes[:self.ptr],
+            self.action_is_pads[:self.ptr],
+            self.state_is_pads[:self.ptr],
+            self.image_is_pads[:self.ptr],
+            self.tasks[:self.ptr],
         )
-        
-    def get_batch(self, start: int, end: int):
-        """
-        Returns a minibatch as a dict for PPO update.
-        """
+    
+    def get_ppo_batch(self, start: int, end: int):
         return {
-            "observation.images.front": self.obs[start:end],
+            "observations": self.obs[start:end],
             "actions": self.actions[start:end],
             "rewards": self.rewards[start:end],
             "dones": self.dones[start:end],
             "log_probs": self.log_probs[start:end],
             "values": self.values[start:end],
+        }
+    
+    def get_smolvla_batch(self, start: int, end: int):
+        """
+        Returns a minibatch as a dict for PPO update.
+        
+        batch for smolvla needs to contain:
+            - observation.images.front
+            - actions
+            - observation.state
+            - timestamp
+            - frame_index
+            - episode_index
+            - index
+            - task_index
+            - action_is_pad
+            - observation.state_is_pad
+            - observation.images.front_is_pad
+            - task
+        """
+        return {
+            "observation.images.front": self.obs[start].permute(2, 0, 1),  # Change HWC to CHW
+            "action": self.actions[start:end],
+            "observation.state": self.actions[start+1],
+            "timestamp": self.timestamps[start],
+            "frame_index": self.frame_indexes[start],
+            "episode_index": self.episode_indexes[start],
+            "index": self.indexes[start],
+            "task_index": self.task_indexes[start],
+            "action_is_pad": self.action_is_pads[start:end],
+            "observation.state_is_pad": self.state_is_pads[start],
+            "observation.images.front_is_pad": self.image_is_pads[start],
+            "task": self.tasks[start],
             # Add other fields as needed
         }
     

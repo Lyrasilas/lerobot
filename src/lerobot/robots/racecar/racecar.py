@@ -44,8 +44,8 @@ class Racecar(Robot):
             "brake": DummyMotor(3, MotorNormMode.RANGE_0_1),
         }
         self.cameras = make_cameras_from_configs(config.cameras)
-
-        self.env = gymnasium.make("CarRacing-v3", render_mode="rgb_array", continuous=True, track_style="circle_big", view="center")
+        print("[DEBUG] Racecar motors and cameras initialized.")
+        self.env = gymnasium.make("CarRacing-v3", render_mode="rgb_array", continuous=True, track_style="default", view="car")
         print("[DEBUG] Racecar environment created successfully.")
         self._env_obs, _ = self.env.reset()
         
@@ -154,6 +154,7 @@ class Racecar(Robot):
         # Simulate sending commands to the motors
         # time.sleep(0.1)
         action_values = np.array([val for key, val in action.items() if key.endswith(".pos")], dtype=np.float32)
+        # print("[DEBUG] Sending action to Racecar environment:", action_values)
         self._env_obs, _, _, _, _ = self.env.step(action_values)
         # logger.info("Actions sent to Racecar motors.")
 

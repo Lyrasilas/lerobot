@@ -165,6 +165,85 @@ def update_policy(
     train_metrics.update_s = time.perf_counter() - start_time
     return train_metrics, output_dict
 
+def update_policy_ppo(
+    train_metrics: MetricsTracker,
+    policy: PreTrainedPolicy,
+    batch: Any,
+    optimizer: Optimizer,
+    grad_clip_norm: float,
+    grad_scaler: GradScaler,
+    lr_scheduler=None,
+    use_amp: bool = False,
+    lock=None,
+) -> tuple[MetricsTracker, dict]:
+    start_time = time.perf_counter()
+    device = get_device_from_parameters(policy)
+    policy.train()
+    with torch.autocast(device_type=device.type) if use_amp else nullcontext():
+        # print("DEBUG: batch action size", batch["action"].shape)
+        loss_clip, loss_dict = ppo_clip_loss(policy, batch)
+        # TODO(rcadene): policy.unnormalize_outputs(out_dict)
+    grad_scaler.scale(loss_clip).backward()
+
+    # Unscale the gradient of the optimizer's assigned params in-place **prior to gradient clipping**.
+    grad_scaler.unscale_(optimizer)
+
+    grad_norm = torch.nn.utils.clip_grad_norm_(
+        policy.parameters(),
+        grad_clip_norm,
+        error_if_nonfinite=False,
+    )
+
+    # Optimizer's gradients are already unscaled, so scaler.step does not unscale them,
+    # although it still skips optimizer.step() if the gradients contain infs or NaNs.
+    with lock if lock is not None else nullcontext():
+        grad_scaler.step(optimizer)
+    # Updates the scale for next iteration.
+    grad_scaler.update()
+
+    optimizer.zero_grad()
+
+    # Step through pytorch scheduler at every batch instead of epoch
+    if lr_scheduler is not None:
+        lr_scheduler.step()
+
+    if has_method(policy, "update"):
+        # To possibly update an internal buffer (for instance an Exponential Moving Average like in TDMPC).
+        policy.update()
+
+    train_metrics.loss = loss_clip.item()
+    train_metrics.grad_norm = grad_norm.item()
+    train_metrics.lr = optimizer.param_groups[0]["lr"]
+    train_metrics.update_s = time.perf_counter() - start_time
+    return train_metrics, loss_dict
+
+
+def ppo_clip_loss(policy, batch, clip_epsilon=0.2, value_coef=0.5, entropy_coef=0.01):
+    """
+    batch: dict with keys:
+        - observations
+        - actions
+        - log_probs (old)
+        - advantages
+        - returns
+    """
+    # Get new log_probs, entropy, and values from the policy
+    new_log_probs, entropy, new_values = policy.evaluate_actions(
+        batch
+    )
+    # Calculate probability ratio
+    ratios = torch.exp(new_log_probs - batch["log_probs"])
+    # Clipped surrogate objective
+    surr1 = ratios * batch["advantages"]
+    surr2 = torch.clamp(ratios, 1.0 - clip_epsilon, 1.0 + clip_epsilon) * batch["advantages"]
+    policy_loss = -torch.min(surr1, surr2).mean()
+    # Value function loss
+    value_loss = value_coef * (new_values.squeeze(-1) - batch["returns"]).pow(2).mean()
+    # Entropy bonus
+    entropy_loss = -entropy_coef * entropy.mean()
+    # Total loss
+    loss = policy_loss + value_loss + entropy_loss
+    return loss, {"ppo_loss":loss.item() ,"policy_loss": policy_loss.item(), "value_loss": value_loss.item(), "entropy_loss": entropy_loss.item()}
 
 @parser.wrap()
 def train(cfg: TrainPipelineConfig):
@@ -276,6 +355,7 @@ def train(cfg: TrainPipelineConfig):
         "lr": AverageMeter("lr", ":0.1e"),
         "update_s": AverageMeter("updt_s", ":.3f"),
         "dataloading_s": AverageMeter("data_s", ":.3f"),
+        "ppo_loss": AverageMeter("ppo_loss", ":.3f"),
     }
 
     print("[DEBUG] Initializing train tracker")
@@ -397,12 +477,21 @@ def train(cfg: TrainPipelineConfig):
                 }
                 
                 transition = {
-                              "obs": prev_obs.permute(0,2,3,1).squeeze(0).detach().cpu(),
-                              "action": action.squeeze(0).squeeze(0).squeeze(0).detach().cpu(),
-                              "reward": reward,
-                              "done": terminated,
-                              "log_prob": log_prob.detach().cpu(),
-                              "value": value.detach().cpu(),
+                                "obs": prev_obs.permute(0,2,3,1).squeeze(0).detach().cpu(),
+                                "action": action.squeeze(0).squeeze(0).squeeze(0).detach().cpu(),
+                                "reward": reward,
+                                "done": terminated,
+                                "log_prob": log_prob.detach().cpu(),
+                                "value": value.detach().cpu(),
+                                "timestamp": timestamp,
+                                "frame_index": ppo_step,
+                                "episode_index": 0,
+                                "index": ppo_step,
+                                "task_index": 0,
+                                "action_is_pad": torch.tensor(False).unsqueeze(0),
+                                "state_is_pad": torch.tensor(False).unsqueeze(0),
+                                "image_is_pad": torch.tensor(False).unsqueeze(0),
+                                "task": "Drive on the road.",
                              }
                 rollout_buffer.add(**transition)
                 if rollout_buffer.ptr >= rollout_buffer.buffer_size:
@@ -424,11 +513,16 @@ def train(cfg: TrainPipelineConfig):
                     for epoch in range(ppo_epochs):
                         for start in range(0, rollout_buffer.buffer_size, ppo_batch_size):
                             end = start + ppo_batch_size
-                            mbatch = rollout_buffer.get_batch(start, end)
+                            mbatch_ppo = rollout_buffer.get_ppo_batch(start, end)
+                            mbatch_smolvla = rollout_buffer.get_smolvla_batch(start, end)
+                            for k in mbatch_smolvla:
+                                if isinstance(mbatch_smolvla[k], torch.Tensor):
+                                    mbatch_smolvla[k] = mbatch_smolvla[k].unsqueeze(0)
+                            mbatch = {**mbatch_ppo, **mbatch_smolvla}
                             mbatch["advantages"] = advantages[start:end]
                             mbatch["returns"] = returns[start:end]
                             print("DEBUG: PPO minibatch from", start, "to", end)
-                            train_tracker, output_dict = update_policy(
+                            train_tracker, output_dict = update_policy_ppo(
                                 train_tracker,
                                 policy,
                                 mbatch,
@@ -438,6 +532,13 @@ def train(cfg: TrainPipelineConfig):
                                 lr_scheduler=lr_scheduler,
                                 use_amp=cfg.policy.use_amp,
                             )
+                        logging.info(train_tracker)
+                        if wandb_logger:
+                            wandb_log_dict = train_tracker.to_dict()
+                            if output_dict:
+                                wandb_log_dict.update(output_dict)
+                            wandb_logger.log_dict(wandb_log_dict, step)
+                        train_tracker.reset_averages()
                     rollout_buffer.reset()
 
                 # policy.forward(batch)  # to potentially update internal buffers
@@ -448,11 +549,10 @@ def train(cfg: TrainPipelineConfig):
         start_time = time.perf_counter()
         batch = next(dl_iter)
         train_tracker.dataloading_s = time.perf_counter() - start_time
-
         for key in batch:
             if isinstance(batch[key], torch.Tensor):
                 batch[key] = batch[key].to(device, non_blocking=device.type == "cuda")
-
+        
         train_tracker, output_dict = update_policy(
             train_tracker,
             policy,

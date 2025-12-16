@@ -57,12 +57,15 @@ import math
 import os
 import re
 from collections import deque
+import time
 
+import numpy as np
 import safetensors
 import torch
 import torch.nn.functional as F  # noqa: N812
 from torch import Tensor, nn
 from transformers import AutoProcessor
+import cv2
 
 from lerobot.constants import ACTION, OBS_STATE
 from lerobot.policies.normalize import (
@@ -393,10 +396,11 @@ class SmolVLAPolicy(PreTrainedPolicy):
 
         images, img_masks = self.prepare_images(batch)
         state = self.prepare_state(batch)
+        # print("DEBUG: state before prepare_language", state)
         lang_tokens, lang_masks = self.prepare_language(batch)
 
         actions = self.model.sample_actions(images, img_masks, lang_tokens, lang_masks, state, noise=noise)
-
+        # print("DEBUG: actions before unnormalize", actions)
         # Unpad actions
         original_action_dim = self.config.action_feature.shape[0]
         actions = actions[:, :, :original_action_dim]
@@ -441,10 +445,11 @@ class SmolVLAPolicy(PreTrainedPolicy):
         # querying the policy.
         if len(self._queues[ACTION]) == 0:
             actions = self._get_action_chunk(batch, noise)
+            # print("[DEBUG] New action chunk predicted:", actions)
             # `self.predict_action_chunk` returns a (batch_size, n_action_steps, action_dim) tensor, but the queue
             # effectively has shape (n_action_steps, batch_size, *), hence the transpose.
             self._queues[ACTION].extend(actions.transpose(0, 1)[: self.config.n_action_steps])
-
+        # print("[DEBUG] Action queue length:", len(self._queues[ACTION]))
         return self._queues[ACTION].popleft()
 
     def forward(self, batch: dict[str, Tensor], noise=None, time=None) -> dict[str, Tensor]:
@@ -476,6 +481,7 @@ class SmolVLAPolicy(PreTrainedPolicy):
 
         # For backward pass
         loss = losses.mean()
+        # print("DEBUG: final loss", loss)
         # For backward pass
         loss_dict["loss"] = loss.item()
         return loss, loss_dict, mean, std, value
@@ -592,6 +598,31 @@ class SmolVLAPolicy(PreTrainedPolicy):
     def get_value(self, batch):
         _, _, _, _, value = self.forward(batch)
         return value
+    
+    def evaluate_actions(self, batch):
+        _, _, mean, std, value = self.forward(batch)
+        dists = torch.distributions.Normal(mean, std)
+        
+        raw_actions = batch["action"]
+        
+        action = torch.zeros(batch["action"].size())
+        action[..., 0] = torch.tanh(raw_actions[..., 0])
+        action[..., 1:] = torch.sigmoid(raw_actions[..., 1:])
+        # calculate log_probs
+        log_probs = dists.log_prob(raw_actions)
+        
+        tanh_jacobian = torch.log(1 - action[..., 0]**2 + 1e-6)
+        sigmoid_jacobian = action[..., 1:].log() + (1- action[..., 1:]).log()
+        # tanh_jacobian = tanh_jacobian.to(self.device)
+        # sigmoid_jacobian = sigmoid_jacobian.to(self.device)
+        log_probs[..., 0] -= tanh_jacobian
+        log_probs[..., 1:] -= sigmoid_jacobian
+        # sum to one log_prob
+        log_probs = log_probs.sum(-1)  # maybe change for larger batches
+        
+        entropy = dists.entropy().sum(-1)
+        
+        return log_probs, entropy, value.squeeze(-1)
 
 
 def pad_tensor(tensor, max_len, pad_value=0):
@@ -665,9 +696,17 @@ class VLAFlowMatching(nn.Module):
         self.action_out_proj = nn.Linear(self.vlm_with_expert.expert_hidden_size, self.config.max_action_dim)
         
         # New layers for action distribution prediction used in PPO
+        
         self.actor_head_mean_proj = nn.Linear(self.vlm_with_expert.expert_hidden_size, self.config.max_action_dim)
         self.actor_head_logstd_proj = nn.Linear(self.vlm_with_expert.expert_hidden_size, self.config.max_action_dim)
         self.actor_head_value_proj = nn.Linear(self.vlm_with_expert.expert_hidden_size, 1)
+
+        # # Register forward hooks for debugging
+        # def hook_fn(module, input, output):
+        #     print(f"[HOOK] {module.__class__.__name__} was used in forward pass")
+        # self.actor_head_mean_proj.register_forward_hook(hook_fn)
+        # self.actor_head_logstd_proj.register_forward_hook(hook_fn)
+        # self.actor_head_value_proj.register_forward_hook(hook_fn)
 
         self.action_time_mlp_in = nn.Linear(
             self.vlm_with_expert.expert_hidden_size * 2, self.vlm_with_expert.expert_hidden_size
@@ -769,11 +808,11 @@ class VLAFlowMatching(nn.Module):
         lang_emb = lang_emb * math.sqrt(lang_emb_dim)
 
         embs.append(lang_emb)
+
         pad_masks.append(lang_masks)
 
         num_lang_embs = lang_emb.shape[1]
         att_masks += [0] * num_lang_embs
-
         state_emb = self.state_proj(state)
         state_emb = state_emb[:, None, :] if state_emb.ndim == 2 else state_emb
         embs.append(state_emb)
@@ -790,7 +829,6 @@ class VLAFlowMatching(nn.Module):
         pad_masks = torch.cat(pad_masks, dim=1)
         att_masks = torch.tensor(att_masks, dtype=torch.bool, device=pad_masks.device)
         att_masks = att_masks[None, :]
-
         seq_len = pad_masks.shape[1]
         if seq_len < self.prefix_length:
             embs = pad_tensor(embs, self.prefix_length, pad_value=0)
@@ -798,7 +836,6 @@ class VLAFlowMatching(nn.Module):
             att_masks = pad_tensor(att_masks, self.prefix_length, pad_value=0)
 
         att_masks = att_masks.expand(bsize, -1)
-
         return embs, pad_masks, att_masks
 
     def embed_suffix(self, noisy_actions, timestep):
@@ -896,6 +933,7 @@ class VLAFlowMatching(nn.Module):
         logstd = logstd[..., :3]
         value = self.actor_head_value_proj(suffix_out)
         losses = F.mse_loss(u_t, v_t, reduction="none")
+        # print("DEBUG: losses", losses, losses.shape)
         std = torch.exp(logstd)
         return losses, mean, std, value
 
@@ -907,10 +945,10 @@ class VLAFlowMatching(nn.Module):
         if noise is None:
             actions_shape = (bsize, self.config.chunk_size, self.config.max_action_dim)
             noise = self.sample_noise(actions_shape, device)
-
         prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
             images, img_masks, lang_tokens, lang_masks, state=state
         )
+        # print("DEBUG: prefix_embs shape", prefix_embs)
         # print("DEBUG: masks in sampling")
         prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
         prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
@@ -925,7 +963,6 @@ class VLAFlowMatching(nn.Module):
         )
         dt = -1.0 / self.config.num_steps
         dt = torch.tensor(dt, dtype=torch.float32, device=device)
-
         x_t = noise
         time = torch.tensor(1.0, dtype=torch.float32, device=device)
         while time >= -dt / 2:
