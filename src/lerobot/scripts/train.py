@@ -510,7 +510,7 @@ def train(cfg: TrainPipelineConfig):
                     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
                     # PPO update loop
-                    ppo_batch_size = 2
+                    ppo_batch_size = 64
                     ppo_epochs = 4
                     for epoch in range(ppo_epochs):
                         for start in range(0, rollout_buffer.buffer_size, ppo_batch_size):
