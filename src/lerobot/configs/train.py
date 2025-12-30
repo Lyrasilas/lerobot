@@ -53,7 +53,7 @@ class TrainPipelineConfig(HubMixin):
     num_workers: int = 4
     batch_size: int = 8
     steps: int = 100_000
-    replay_capacity: int = 256
+    replay_capacity: int = 2_000
     eval_freq: int = 20_000
     log_freq: int = 200
     # Frequency of DRL updates

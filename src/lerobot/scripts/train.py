@@ -232,14 +232,15 @@ def ppo_clip_loss(policy, batch, clip_epsilon=0.2, value_coef=0.5, entropy_coef=
     new_log_probs, entropy, new_values = policy.evaluate_actions(
         batch
     )
+    device = batch["device"]
     # Calculate probability ratio
-    ratios = torch.exp(new_log_probs - batch["log_probs"])
+    ratios = torch.exp(new_log_probs - batch["log_probs"]).to(device)
     # Clipped surrogate objective
-    surr1 = ratios * batch["advantages"]
-    surr2 = torch.clamp(ratios, 1.0 - clip_epsilon, 1.0 + clip_epsilon) * batch["advantages"]
-    policy_loss = -torch.min(surr1, surr2).mean()
+    surr1 = ratios * batch["advantages"].to(device)
+    surr2 = torch.clamp(ratios, 1.0 - clip_epsilon, 1.0 + clip_epsilon) * batch["advantages"].to(device)
+    policy_loss = -torch.min(surr1, surr2).mean().to(device)
     # Value function loss
-    value_loss = value_coef * (new_values.squeeze(-1) - batch["returns"]).pow(2).mean()
+    value_loss = value_coef * (new_values.squeeze(-1).to(device) - batch["returns"].to(device)).pow(2).mean()
     # Entropy bonus
     entropy_loss = -entropy_coef * entropy.mean()
     # Total loss
@@ -294,7 +295,7 @@ def train(cfg: TrainPipelineConfig):
         ds_meta=dataset.meta,
     )
     print("[DEBUG] Policy created")
-
+    
     print("[DEBUG] Creating optimizer and scheduler")
     logging.info("Creating optimizer and scheduler")
     optimizer, lr_scheduler = make_optimizer_and_scheduler(cfg, policy)
@@ -320,6 +321,7 @@ def train(cfg: TrainPipelineConfig):
     logging.info(f"{dataset.num_episodes=}")
     logging.info(f"{num_learnable_params=} ({format_big_number(num_learnable_params)})")
     logging.info(f"{num_total_params=} ({format_big_number(num_total_params)})")
+
 
     print("[DEBUG] Creating dataloader")
     # create dataloader for offline training
@@ -348,6 +350,7 @@ def train(cfg: TrainPipelineConfig):
     print("[DEBUG] Dataloader iterator created")
 
     print("[DEBUG] Setting policy to train mode")
+
     policy.train()
 
     print("[DEBUG] Initializing metrics")
@@ -374,10 +377,11 @@ def train(cfg: TrainPipelineConfig):
         # print_new_cuda_tensors(prev_tensors)
         # # print_live_cuda_tensors()
         # print("-----------------------------------------------------------------------------------------------------------")
+
         is_DRL_step = cfg.DRL_freq > 0 and step > 0 and  step % cfg.DRL_freq == 0
         # is_DRL_step = cfg.DRL_freq > 0 and step % cfg.DRL_freq == 0
 
-        if is_DRL_step:
+        if is_DRL_step and step > 0:
             # # print_live_cuda_tensors()
             # prev_tensors = get_cuda_tensor_ids()
             # print_new_cuda_tensors(prev_tensors)
@@ -401,12 +405,18 @@ def train(cfg: TrainPipelineConfig):
                     "frame_index": torch.tensor(ppo_step).unsqueeze(0).unsqueeze(0).to(device),
                     "episode_index": torch.tensor(0).unsqueeze(0).unsqueeze(0).to(device),
                     "index": torch.tensor(ppo_step).unsqueeze(0).unsqueeze(0).to(device),
+
                     "task_index": torch.tensor(0).unsqueeze(0).unsqueeze(0).to(device),
                     "action_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
                     "observation.state_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
                     "observation.images.front_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
                     "task": ["Drive on the road."],
                 }
+            for k in batch:
+                if k == "task":
+                    continue
+                if batch[k].isnan().any():
+                    print("DEBUG: NaN in batch key", k)
 
             while not done:
                 # # report_gpu_memory(rollout_buffer)
@@ -414,7 +424,7 @@ def train(cfg: TrainPipelineConfig):
                 # prev_tensors = get_cuda_tensor_ids()
                 # # print_live_cuda_tensors()
                 # print("------------------------------------------------DEBUG: PPO step------------------------------------------------")
-                print("DEBUG: PPO step start", ppo_step)
+                # print("DEBUG: PPO step start", ppo_step)
                 # get action distributions for further calcs
                 dists, value = policy.get_action_distributions(batch)
                 # sample action
@@ -425,6 +435,15 @@ def train(cfg: TrainPipelineConfig):
                 action[..., 1:] = torch.sigmoid(raw_action[..., 1:])
                 # calculate log_probs
                 log_probs = dists.log_prob(raw_action)
+                if (raw_action >= 100).any() or (raw_action <= -100).any(): 
+                    print("DEBUG: raw_action", raw_action)
+                    print("DEBUG: action", value)
+                if log_probs.isnan().any():
+                    print("DEBUG: NaN in log_probs")
+                    print("DEBUG: log_probs", log_probs)
+                    print("DEBUG: raw_action", raw_action)
+                    print("DEBUG: dist", dists, value, action)
+                    exit(1)
                 # mappings for log_probs and their use
                 tanh_jacobian = torch.log(1 - action[..., 0]**2 + 1e-6)
                 sigmoid_jacobian = action[..., 1:].log() + (1- action[..., 1:]).log()
@@ -477,7 +496,11 @@ def train(cfg: TrainPipelineConfig):
                     "observation.images.front_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
                     "task": ["Drive on the road."],
                 }
-                
+                for k in batch:
+                    if k == "task":
+                        continue
+                    if batch[k].isnan().any():
+                        print("DEBUG: NaN in batch key", k)
                 transition = {
                                 "obs": prev_obs.permute(0,2,3,1).squeeze(0).detach().cpu(),
                                 "action": action.squeeze(0).squeeze(0).squeeze(0).detach().cpu(),
@@ -505,25 +528,42 @@ def train(cfg: TrainPipelineConfig):
                     values = rollout_buffer.values
                     dones = rollout_buffer.dones
                     advantages = compute_gae(rewards, values, dones, next_value)
+                    print("DEBUG: advantages mean", advantages.mean())
+                    print("DEBUG: advantages std", advantages.std())
                     returns = advantages + values
                     # Normalize advantages
                     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
                     # PPO update loop
-                    ppo_batch_size = 64
+                    ppo_batch_size = 50
                     ppo_epochs = 4
                     for epoch in range(ppo_epochs):
                         for start in range(0, rollout_buffer.buffer_size, ppo_batch_size):
                             end = start + ppo_batch_size
                             mbatch_ppo = rollout_buffer.get_ppo_batch(start, end)
+                            for k in mbatch_ppo:
+                                if isinstance(mbatch_ppo[k], torch.Tensor):
+                                    mbatch_ppo[k] = mbatch_ppo[k].to(device)
+                            for k in mbatch_ppo:
+                                if k == "task":
+                                    continue
+                                if mbatch_ppo[k].isnan().any():
+                                    print("DEBUG: NaN in mbatch_ppo key", k)
                             mbatch_smolvla = rollout_buffer.get_smolvla_batch(start, end)
                             for k in mbatch_smolvla:
                                 if isinstance(mbatch_smolvla[k], torch.Tensor):
-                                    mbatch_smolvla[k] = mbatch_smolvla[k].unsqueeze(0)
+                                    mbatch_smolvla[k] = mbatch_smolvla[k].unsqueeze(0).to(device)
+                            for k in mbatch_smolvla:
+                                if k == "task":
+                                    continue
+                                if mbatch_smolvla[k].isnan().any():
+                                    print("DEBUG: NaN in mbatch_smolvla key", k)
                             mbatch = {**mbatch_ppo, **mbatch_smolvla}
                             mbatch["advantages"] = advantages[start:end]
                             mbatch["returns"] = returns[start:end]
+                            mbatch["device"] = device
                             print("DEBUG: PPO minibatch from", start, "to", end)
+                            # mbatch.to(device)
                             train_tracker, output_dict = update_policy_ppo(
                                 train_tracker,
                                 policy,
@@ -546,6 +586,7 @@ def train(cfg: TrainPipelineConfig):
                 # policy.forward(batch)  # to potentially update internal buffers
                 done = terminated or truncated  
             print("DEBUG: PPO episode done", done)
+            step += 1
             continue
 
         start_time = time.perf_counter()
@@ -659,7 +700,8 @@ def compute_gae(rewards, values, dones, next_value, gamma=0.99, lam=0.95):
         delta = rewards[t] + gamma * next_v * (1 - dones_f[t]) - values[t]
         gae = delta + gamma * lam * (1 - dones_f[t]) * gae
         advantages[t] = gae
-    return advantages
+    norm_advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+    return norm_advantages
     
 
 def main():

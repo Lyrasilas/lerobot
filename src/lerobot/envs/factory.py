@@ -55,7 +55,6 @@ def make_env(cfg: EnvConfig, n_envs: int = 1, use_async_envs: bool = False) -> g
         raise ValueError("`n_envs must be at least 1")
 
     package_name = f"gym_{cfg.type}"
-
     try: 
         return gym.make(cfg.task, render_mode=cfg.render_mode, continuous=cfg.continuous, track_style=cfg.track_style, view=cfg.view)
     except Exception:

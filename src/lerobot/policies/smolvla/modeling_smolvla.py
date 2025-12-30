@@ -600,6 +600,9 @@ class SmolVLAPolicy(PreTrainedPolicy):
         return value
     
     def evaluate_actions(self, batch):
+        ignored_keys = ["device"]
+        device = batch["device"]
+        batch = {k: v for k, v in batch.items() if k not in ignored_keys}
         _, _, mean, std, value = self.forward(batch)
         dists = torch.distributions.Normal(mean, std)
         
@@ -613,8 +616,8 @@ class SmolVLAPolicy(PreTrainedPolicy):
         
         tanh_jacobian = torch.log(1 - action[..., 0]**2 + 1e-6)
         sigmoid_jacobian = action[..., 1:].log() + (1- action[..., 1:]).log()
-        # tanh_jacobian = tanh_jacobian.to(self.device)
-        # sigmoid_jacobian = sigmoid_jacobian.to(self.device)
+        tanh_jacobian = tanh_jacobian.to(device)
+        sigmoid_jacobian = sigmoid_jacobian.to(device)
         log_probs[..., 0] -= tanh_jacobian
         log_probs[..., 1:] -= sigmoid_jacobian
         # sum to one log_prob
