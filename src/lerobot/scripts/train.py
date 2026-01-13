@@ -1,6 +1,8 @@
 import gc
 import torch
 
+# from tests.envs.mujoco.test_mujoco_rendering import model
+
 def get_cuda_tensor_ids():
     return {id(obj): obj for obj in gc.get_objects() if torch.is_tensor(obj) and obj.is_cuda}
 
@@ -184,12 +186,13 @@ def update_policy_ppo(
         # print("DEBUG: batch action size", batch["action"].shape)
         loss_clip, loss_dict = ppo_clip_loss(policy, batch)
         # TODO(rcadene): policy.unnormalize_outputs(out_dict)
-        if penalty is not None:
-            loss_clip += penalty * 0.1  # penalty coefficient
+        # if penalty is not None:
+        #     loss_clip += penalty * 0.1  # penalty coefficient
         print("DEBUG: PPO total loss", loss_clip)
     grad_scaler.scale(loss_clip).backward()
 
     # Unscale the gradient of the optimizer's assigned params in-place **prior to gradient clipping**.
+    print("DEBUG: Optimizer", optimizer)
     grad_scaler.unscale_(optimizer)
 
     print("DEBUG:", grad_clip_norm)
@@ -374,22 +377,282 @@ def train(cfg: TrainPipelineConfig):
         cfg.batch_size, dataset.num_frames, dataset.num_episodes, train_metrics, initial_step=step
     )
 
-    logging.info("Starting PPO layer warmup")
+    # logging.info("Starting PPO layer warmup")
 
-    for name, param in policy.named_parameters():
-        if "actor_head" in name:
-            param.requires_grad = True
-        else:
-            param.requires_grad = False
+    # for name, param in policy.named_parameters():
+    #     if "actor_head" in name:
+    #         param.requires_grad = True
+    #     else:
+    #         param.requires_grad = False
             
-    head_params = []
-    for name, param in policy.named_parameters():
-        if "actor_head" in name:
-            head_params.append(param)
+    # head_params = []
+    # for name, param in policy.named_parameters():
+    #     if "actor_head" in name:
+    #         head_params.append(param)
             
-    head_optimizer = torch.optim.AdamW(head_params, lr=3e-4, weight_decay=1e-2)
+    # head_optimizer = torch.optim.AdamW(head_params, lr=3e-4, weight_decay=1e-2)
     
-    for warmup_step in range(1000):
+    # for warmup_step in range(1000):
+    #         ppo_env = make_env(cfg.env)
+    #         obs, info = ppo_env.reset()
+    #         # obs = obs[:168, ...]
+
+    #         ppo_env.render()
+    #         ppo_step = 0
+    #         timestamp = ppo_step / cfg.env.fps
+    #         done = False
+    #         norm_obs = obs/255.0
+    #         # print("DEBUG:", norm_obs)
+    #         batch = {
+    #                 "observation.images.front": torch.tensor(norm_obs).unsqueeze(0).to(device).permute(0,3,1,2),
+    #                 "action": torch.zeros((1, ppo_env.action_space.shape[0])).unsqueeze(0).to(device),
+    #                 "observation.state": torch.zeros((1,ppo_env.action_space.shape[0])).unsqueeze(0).to(device),
+    #                 "timestamp": torch.tensor(timestamp).unsqueeze(0).unsqueeze(0).to(device),
+    #                 "frame_index": torch.tensor(ppo_step).unsqueeze(0).unsqueeze(0).to(device),
+    #                 "episode_index": torch.tensor(0).unsqueeze(0).unsqueeze(0).to(device),
+    #                 "index": torch.tensor(ppo_step).unsqueeze(0).unsqueeze(0).to(device),
+
+    #                 "task_index": torch.tensor(0).unsqueeze(0).unsqueeze(0).to(device),
+    #                 "action_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
+    #                 "observation.state_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
+    #                 "observation.images.front_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
+    #                 "task": ["Drive on the road."],
+    #             }
+    #         for k in batch:
+    #             if k == "task":
+    #                 continue
+    #             if batch[k].isnan().any():
+    #                 print("DEBUG: NaN in batch key", k)
+
+    #         while not done:
+    #             # # report_gpu_memory(rollout_buffer)
+    #             # print_new_cuda_tensors(prev_tensors)
+    #             # prev_tensors = get_cuda_tensor_ids()
+    #             # # print_live_cuda_tensors()
+    #             # print("------------------------------------------------DEBUG: PPO step------------------------------------------------")
+    #             # print("DEBUG: PPO step start", ppo_step)
+    #             # get action distributions for further calcs
+    #             dists, value = policy.get_action_distributions(batch)
+    #             # sample action
+    #             raw_action = dists.rsample()
+                
+    #             penalty_0 = ((raw_action[..., 0] < -1).float() * (-1 - raw_action[..., 0]).pow(2) + (raw_action[..., 0] > 1).float() * (raw_action[..., 0] - 1).pow(2))
+    #             penalty_rest = ((raw_action[..., 1:] < 0).float() * (0 - raw_action[..., 1:]).pow(2) + (raw_action[..., 1:] > 1).float() * (raw_action[..., 1:] - 1).pow(2))
+    #             penalty = penalty_0.mean() + penalty_rest.mean()
+                
+    #             # map action to environment friendly range of [(-1,1),(0,1),(0,1)]
+    #             action = torch.zeros(batch["action"].size())
+    #             action[..., 0] = torch.tanh(raw_action[..., 0])
+    #             action[..., 1:] = torch.sigmoid(raw_action[..., 1:])
+    #             # calculate log_probs
+    #             log_probs = dists.log_prob(raw_action)
+    #             if (raw_action >= 100).any() or (raw_action <= -100).any(): 
+    #                 print("DEBUG: raw_action", raw_action)
+    #                 print("DEBUG: action", value)
+    #             if log_probs.isnan().any():
+    #                 print("DEBUG: NaN in log_probs")
+    #                 print("DEBUG: log_probs", log_probs)
+    #                 print("DEBUG: raw_action", raw_action)
+    #                 print("DEBUG: dist", dists, value, action)
+    #                 exit(1)
+    #             # mappings for log_probs and their use
+    #             tanh_jacobian = torch.log(1 - action[..., 0]**2 + 1e-6)
+    #             sigmoid_jacobian = action[..., 1:].log() + (1- action[..., 1:]).log()
+    #             tanh_jacobian = tanh_jacobian.to(device)
+    #             sigmoid_jacobian = sigmoid_jacobian.to(device)
+    #             log_probs[..., 0] -= tanh_jacobian
+    #             log_probs[..., 1:] -= sigmoid_jacobian
+    #             # sum to one log_prob
+    #             log_prob = log_probs.sum(-1)  # maybe change for larger batches
+    #             # TODO: Fix mask calculation
+    #             # TODO: Calculate log_prob etc. for PPO
+    #             # TODO: Store transition in replay buffer
+    #             # TODO: Perform PPO update steps
+
+    #             np_action = action.squeeze(0).squeeze(0).detach().numpy()
+    #             obs, reward, terminated, truncated, info = ppo_env.step(np_action)
+    #             # obs = obs[:168, ...]
+    #             ppo_env.render()
+    #             # action = action.unsqueeze(0)
+    #             prev_action = batch["action"].unsqueeze(0)
+    #             prev_obs = batch["observation.images.front"]
+    #             ppo_step += 1
+    #             timestamp = ppo_step / cfg.env.fps
+    #             norm_obs = obs/255.0
+    #             # batch = {
+    #             #     "observation.images.front": torch.tensor(norm_obs).unsqueeze(0).to(device).permute(0,3,1,2),
+    #             #     "action": action.detach().clone().to(device),
+    #             #     "observation.state": prev_action.detach().clone().to(device),  # just a placeholder
+    #             #     "timestamp": torch.tensor(timestamp).unsqueeze(0).unsqueeze(0).to(device),
+    #             #     "frame_index": torch.tensor(ppo_step).unsqueeze(0).unsqueeze(0).to(device),
+    #             #     "episode_index": torch.tensor(0).unsqueeze(0).unsqueeze(0).to(device),
+    #             #     "index": torch.tensor(ppo_step).unsqueeze(0).unsqueeze(0).to(device),
+    #             #     "task_index": torch.tensor(0).unsqueeze(0).unsqueeze(0).to(device),
+    #             #     "action_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
+    #             #     "observation.state_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
+    #             #     "observation.images.front_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
+    #             #     "task": ["Drive on the road."],
+    #             # }
+    #             # print("DEBUG: action and prev_action:", action, prev_action)
+    #             batch = {
+    #                 "observation.images.front": torch.tensor(norm_obs).unsqueeze(0).to(device).permute(0,3,1,2),
+    #                 "action": action.detach().clone().to(device),
+    #                 "observation.state": prev_action.detach().clone().to(device),  # just a placeholder
+    #                 "timestamp": torch.tensor(timestamp).unsqueeze(0).unsqueeze(0).to(device),
+    #                 "frame_index": torch.tensor(ppo_step).unsqueeze(0).unsqueeze(0).to(device),
+    #                 "episode_index": torch.tensor(0).unsqueeze(0).unsqueeze(0).to(device),
+    #                 "index": torch.tensor(ppo_step).unsqueeze(0).unsqueeze(0).to(device),
+    #                 "task_index": torch.tensor(0).unsqueeze(0).unsqueeze(0).to(device),
+    #                 "action_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
+    #                 "observation.state_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
+    #                 "observation.images.front_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
+    #                 "task": ["Drive on the road."],
+    #             }
+    #             for k in batch:
+    #                 if k == "task":
+    #                     continue
+    #                 if batch[k].isnan().any():
+    #                     print("DEBUG: NaN in batch key", k)
+    #             transition = {
+    #                             "obs": prev_obs.permute(0,2,3,1).squeeze(0).detach().cpu(),
+    #                             "action": action.squeeze(0).squeeze(0).squeeze(0).detach().cpu(),
+    #                             "reward": reward,
+    #                             "done": terminated,
+    #                             "log_prob": log_prob.detach().cpu(),
+    #                             "value": value.detach().cpu(),
+    #                             "timestamp": timestamp,
+    #                             "frame_index": ppo_step,
+    #                             "episode_index": 0,
+    #                             "index": ppo_step,
+    #                             "task_index": 0,
+    #                             "action_is_pad": torch.tensor(False).unsqueeze(0),
+    #                             "state_is_pad": torch.tensor(False).unsqueeze(0),
+    #                             "image_is_pad": torch.tensor(False).unsqueeze(0),
+    #                             "task": "Drive on the road.",
+    #                          }
+    #             rollout_buffer.add(**transition)
+    #             if rollout_buffer.ptr >= rollout_buffer.buffer_size:
+    #                 print("DEBUG: Performing PPO update from rollout buffer")
+    #                 # compute GAE advantages
+    #                 with torch.no_grad():
+    #                     next_value = policy.get_value(batch).squeeze(0)
+    #                 rewards = rollout_buffer.rewards
+    #                 values = rollout_buffer.values
+    #                 print("DEBUG:", values)
+    #                 dones = rollout_buffer.dones
+    #                 advantages = compute_gae(rewards, values, dones, next_value)
+    #                 # print("DEBUG: advantages mean", advantages.mean())
+    #                 # print("DEBUG: advantages std", advantages.std())
+    #                 returns = advantages + values
+    #                 # Normalize advantages
+    #                 advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+    #                 # print("DEBUG: rewards mean", returns.mean())
+    #                 # print("DEBUG: rewards std", returns.std())
+    #                 # PPO update loop
+    #                 ppo_batch_size = 32
+    #                 ppo_epochs = 4
+    #                 for epoch in range(ppo_epochs):
+    #                     for start in range(0, rollout_buffer.buffer_size, ppo_batch_size):
+    #                         end = start + ppo_batch_size
+    #                         mbatch_ppo = rollout_buffer.get_ppo_batch(start, end)
+    #                         for k in mbatch_ppo:
+    #                             if isinstance(mbatch_ppo[k], torch.Tensor):
+    #                                 mbatch_ppo[k] = mbatch_ppo[k].to(device)
+    #                         for k in mbatch_ppo:
+    #                             if k == "task":
+    #                                 continue
+    #                             if mbatch_ppo[k].isnan().any():
+    #                                 print("DEBUG: NaN in mbatch_ppo key", k)
+    #                         mbatch_smolvla = rollout_buffer.get_smolvla_batch(start, end)
+    #                         for k in mbatch_smolvla:
+    #                             if isinstance(mbatch_smolvla[k], torch.Tensor):
+    #                                 mbatch_smolvla[k] = mbatch_smolvla[k].unsqueeze(0).to(device)
+    #                         for k in mbatch_smolvla:
+    #                             if k == "task":
+    #                                 continue
+    #                             if mbatch_smolvla[k].isnan().any():
+    #                                 print("DEBUG: NaN in mbatch_smolvla key", k)
+    #                         mbatch = {**mbatch_ppo, **mbatch_smolvla}
+    #                         mbatch["advantages"] = advantages[start:end]
+    #                         mbatch["returns"] = returns[start:end]
+    #                         mbatch["device"] = device
+    #                         print("DEBUG: PPO minibatch from", start, "to", end)
+    #                         # mbatch.to(device)
+    #                         train_tracker, output_dict = update_policy_ppo(
+    #                             train_tracker,
+    #                             policy,
+    #                             mbatch,
+    #                             head_optimizer,
+    #                             0.1,
+    #                             # cfg.optimizer.grad_clip_norm,
+    #                             grad_scaler=grad_scaler,
+    #                             lr_scheduler=lr_scheduler,
+    #                             use_amp=cfg.policy.use_amp,
+    #                             penalty=penalty,
+    #                         )
+    #                     logging.info(train_tracker)
+    #                     if wandb_logger:
+    #                         wandb_log_dict = train_tracker.to_dict()
+    #                         if output_dict:
+    #                             wandb_log_dict.update(output_dict)
+    #                         wandb_logger.log_dict(wandb_log_dict, step)
+    #                     train_tracker.reset_averages()
+    #                 rollout_buffer.reset()
+
+    #             # policy.forward(batch)  # to potentially update internal buffers
+    #             done = terminated or truncated  
+    #         print("DEBUG: PPO episode done", done)
+    #         warmup_step += 1
+    #         if warmup_step % 100 == 0:
+    #             logging.info(f"--------------- PPO head warmup step {warmup_step} ----------------")
+    # for param in policy.parameters():
+    #     param.requires_grad = True
+    
+    # optimizer, lr_scheduler = make_optimizer_and_scheduler(cfg, policy)
+    # grad_scaler = GradScaler(device.type, enabled=cfg.policy.use_amp)
+    
+    # logging.info("PPO layer warmup completed")
+
+    print("[DEBUG] Starting training loop")
+    logging.info("Start offline training on a fixed dataset")
+    for name, param in policy.named_parameters():
+            if "actor_head" in name:
+                param.requires_grad = False
+            else:
+                param.requires_grad = True
+                
+    for _ in range(step, cfg.steps):
+        
+        # prev_tensors = get_cuda_tensor_ids()
+        # # ... your training step code ...
+        # # Existing code for training step goes here
+        # print_new_cuda_tensors(prev_tensors)
+        # # print_live_cuda_tensors()
+        # print("-----------------------------------------------------------------------------------------------------------"))
+        is_DRL_step = cfg.DRL_freq > 0 and step > 0 and  step % cfg.DRL_freq == 0
+        # is_DRL_step = cfg.DRL_freq > 0 and step % cfg.DRL_freq == 0
+        print(step, is_DRL_step)
+        if is_DRL_step and step > 0:
+            for name, param in policy.named_parameters():
+                if "actor_head" in name:
+                    param.requires_grad = True
+                    print("DEBUG: Enabling gradient for", name)
+                else:
+                    param.requires_grad = False
+                    print("DEBUG: Disabling gradient for", name)
+                    
+            head_params = []
+            for name, param in policy.named_parameters():
+                if "actor_head" in name:
+                    head_params.append(param)
+            print("DEBUG: Creating head optimizer for DRL step", head_params)
+            head_optimizer = torch.optim.AdamW(head_params, lr=3e-4, weight_decay=1e-2)
+            # # print_live_cuda_tensors()
+            # prev_tensors = get_cuda_tensor_ids()
+            # print_new_cuda_tensors(prev_tensors)
+            # print("------------------------------------------------DEBUG: IN DRL STEP ------------------------------------------------")
+            logging.info("Performing DRL step. Full PPO episode.")
             ppo_env = make_env(cfg.env)
             obs, info = ppo_env.reset()
             # obs = obs[:168, ...]
@@ -415,28 +678,49 @@ def train(cfg: TrainPipelineConfig):
                     "observation.images.front_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
                     "task": ["Drive on the road."],
                 }
+            print("DEBUG: Initial PPO batch created")
             for k in batch:
                 if k == "task":
                     continue
                 if batch[k].isnan().any():
                     print("DEBUG: NaN in batch key", k)
 
-            while not done:
+            # while not done:
+            while rollout_buffer.ptr < rollout_buffer.buffer_size:
+                if done:
+                    print("DEBUG: PPO episode done", done)
+                    obs, info = ppo_env.reset()
+                    # obs = obs[:168, ...]
+                    ppo_env.render()
+                    ppo_step = 0
+                    timestamp = ppo_step / cfg.env.fps
+                    done = False
+                    norm_obs = obs/255.0
+                    batch = {
+                    "observation.images.front": torch.tensor(norm_obs).unsqueeze(0).to(device).permute(0,3,1,2),
+                    "action": torch.zeros((1, ppo_env.action_space.shape[0])).unsqueeze(0).to(device),
+                    "observation.state": torch.zeros((1,ppo_env.action_space.shape[0])).unsqueeze(0).to(device),
+                    "timestamp": torch.tensor(timestamp).unsqueeze(0).unsqueeze(0).to(device),
+                    "frame_index": torch.tensor(ppo_step).unsqueeze(0).unsqueeze(0).to(device),
+                    "episode_index": torch.tensor(0).unsqueeze(0).unsqueeze(0).to(device),
+                    "index": torch.tensor(ppo_step).unsqueeze(0).unsqueeze(0).to(device),
+
+                    "task_index": torch.tensor(0).unsqueeze(0).unsqueeze(0).to(device),
+                    "action_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
+                    "observation.state_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
+                    "observation.images.front_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
+                    "task": ["Drive on the road."],
+                }
                 # # report_gpu_memory(rollout_buffer)
                 # print_new_cuda_tensors(prev_tensors)
                 # prev_tensors = get_cuda_tensor_ids()
                 # # print_live_cuda_tensors()
-                # print("------------------------------------------------DEBUG: PPO step------------------------------------------------")
+                print("------------------------------------------------DEBUG: PPO step------------------------------------------------")
                 # print("DEBUG: PPO step start", ppo_step)
                 # get action distributions for further calcs
                 dists, value = policy.get_action_distributions(batch)
                 # sample action
                 raw_action = dists.rsample()
-                
-                penalty_0 = ((raw_action[..., 0] < -1).float() * (-1 - raw_action[..., 0]).pow(2) + (raw_action[..., 0] > 1).float() * (raw_action[..., 0] - 1).pow(2))
-                penalty_rest = ((raw_action[..., 1:] < 0).float() * (0 - raw_action[..., 1:]).pow(2) + (raw_action[..., 1:] > 1).float() * (raw_action[..., 1:] - 1).pow(2))
-                penalty = penalty_0.mean() + penalty_rest.mean()
-                
                 # map action to environment friendly range of [(-1,1),(0,1),(0,1)]
                 action = torch.zeros(batch["action"].size())
                 action[..., 0] = torch.tanh(raw_action[..., 0])
@@ -490,7 +774,6 @@ def train(cfg: TrainPipelineConfig):
                 #     "observation.images.front_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
                 #     "task": ["Drive on the road."],
                 # }
-                print("DEBUG: action and prev_action:", action, prev_action)
                 batch = {
                     "observation.images.front": torch.tensor(norm_obs).unsqueeze(0).to(device).permute(0,3,1,2),
                     "action": action.detach().clone().to(device),
@@ -528,6 +811,7 @@ def train(cfg: TrainPipelineConfig):
                                 "task": "Drive on the road.",
                              }
                 rollout_buffer.add(**transition)
+                print("DEBUG: Transition added to rollout buffer. Current ptr:", rollout_buffer.ptr)
                 if rollout_buffer.ptr >= rollout_buffer.buffer_size:
                     print("DEBUG: Performing PPO update from rollout buffer")
                     # compute GAE advantages
@@ -586,240 +870,6 @@ def train(cfg: TrainPipelineConfig):
                                 grad_scaler=grad_scaler,
                                 lr_scheduler=lr_scheduler,
                                 use_amp=cfg.policy.use_amp,
-                                penalty=penalty,
-                            )
-                        logging.info(train_tracker)
-                        if wandb_logger:
-                            wandb_log_dict = train_tracker.to_dict()
-                            if output_dict:
-                                wandb_log_dict.update(output_dict)
-                            wandb_logger.log_dict(wandb_log_dict, step)
-                        train_tracker.reset_averages()
-                    rollout_buffer.reset()
-
-                # policy.forward(batch)  # to potentially update internal buffers
-                done = terminated or truncated  
-            print("DEBUG: PPO episode done", done)
-            warmup_step += 1
-            if warmup_step % 100 == 0:
-                logging.info(f"--------------- PPO head warmup step {warmup_step} ----------------")
-    for param in policy.parameters():
-        param.requires_grad = True
-    
-    optimizer, lr_scheduler = make_optimizer_and_scheduler(cfg, policy)
-    grad_scaler = GradScaler(device.type, enabled=cfg.policy.use_amp)
-    
-    logging.info("PPO layer warmup completed")
-
-    print("[DEBUG] Starting training loop")
-    logging.info("Start offline training on a fixed dataset")
-    for _ in range(step, cfg.steps):
-        # prev_tensors = get_cuda_tensor_ids()
-        # # ... your training step code ...
-        # # Existing code for training step goes here
-        # print_new_cuda_tensors(prev_tensors)
-        # # print_live_cuda_tensors()
-        # print("-----------------------------------------------------------------------------------------------------------")
-
-        is_DRL_step = cfg.DRL_freq > 0 and step > 0 and  step % cfg.DRL_freq == 0
-        # is_DRL_step = cfg.DRL_freq > 0 and step % cfg.DRL_freq == 0
-
-        if is_DRL_step and step > 0:
-            # # print_live_cuda_tensors()
-            # prev_tensors = get_cuda_tensor_ids()
-            # print_new_cuda_tensors(prev_tensors)
-            # print("------------------------------------------------DEBUG: IN DRL STEP ------------------------------------------------")
-            logging.info("Performing DRL step. Full PPO episode.")
-            ppo_env = make_env(cfg.env)
-            obs, info = ppo_env.reset()
-            # obs = obs[:168, ...]
-
-            ppo_env.render()
-            ppo_step = 0
-            timestamp = ppo_step / cfg.env.fps
-            done = False
-            norm_obs = obs/255.0
-            # print("DEBUG:", norm_obs)
-            batch = {
-                    "observation.images.front": torch.tensor(norm_obs).unsqueeze(0).to(device).permute(0,3,1,2),
-                    "action": torch.zeros((1, ppo_env.action_space.shape[0])).unsqueeze(0).to(device),
-                    "observation.state": torch.zeros((1,ppo_env.action_space.shape[0])).unsqueeze(0).to(device),
-                    "timestamp": torch.tensor(timestamp).unsqueeze(0).unsqueeze(0).to(device),
-                    "frame_index": torch.tensor(ppo_step).unsqueeze(0).unsqueeze(0).to(device),
-                    "episode_index": torch.tensor(0).unsqueeze(0).unsqueeze(0).to(device),
-                    "index": torch.tensor(ppo_step).unsqueeze(0).unsqueeze(0).to(device),
-
-                    "task_index": torch.tensor(0).unsqueeze(0).unsqueeze(0).to(device),
-                    "action_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
-                    "observation.state_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
-                    "observation.images.front_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
-                    "task": ["Drive on the road."],
-                }
-            for k in batch:
-                if k == "task":
-                    continue
-                if batch[k].isnan().any():
-                    print("DEBUG: NaN in batch key", k)
-
-            while not done:
-                # # report_gpu_memory(rollout_buffer)
-                # print_new_cuda_tensors(prev_tensors)
-                # prev_tensors = get_cuda_tensor_ids()
-                # # print_live_cuda_tensors()
-                # print("------------------------------------------------DEBUG: PPO step------------------------------------------------")
-                # print("DEBUG: PPO step start", ppo_step)
-                # get action distributions for further calcs
-                dists, value = policy.get_action_distributions(batch)
-                # sample action
-                raw_action = dists.rsample()
-                # map action to environment friendly range of [(-1,1),(0,1),(0,1)]
-                action = torch.zeros(batch["action"].size())
-                action[..., 0] = torch.tanh(raw_action[..., 0])
-                action[..., 1:] = torch.sigmoid(raw_action[..., 1:])
-                # calculate log_probs
-                log_probs = dists.log_prob(raw_action)
-                if (raw_action >= 100).any() or (raw_action <= -100).any(): 
-                    print("DEBUG: raw_action", raw_action)
-                    print("DEBUG: action", value)
-                if log_probs.isnan().any():
-                    print("DEBUG: NaN in log_probs")
-                    print("DEBUG: log_probs", log_probs)
-                    print("DEBUG: raw_action", raw_action)
-                    print("DEBUG: dist", dists, value, action)
-                    exit(1)
-                # mappings for log_probs and their use
-                tanh_jacobian = torch.log(1 - action[..., 0]**2 + 1e-6)
-                sigmoid_jacobian = action[..., 1:].log() + (1- action[..., 1:]).log()
-                tanh_jacobian = tanh_jacobian.to(device)
-                sigmoid_jacobian = sigmoid_jacobian.to(device)
-                log_probs[..., 0] -= tanh_jacobian
-                log_probs[..., 1:] -= sigmoid_jacobian
-                # sum to one log_prob
-                log_prob = log_probs.sum(-1)  # maybe change for larger batches
-                # TODO: Fix mask calculation
-                # TODO: Calculate log_prob etc. for PPO
-                # TODO: Store transition in replay buffer
-                # TODO: Perform PPO update steps
-
-                np_action = action.squeeze(0).squeeze(0).detach().numpy()
-                obs, reward, terminated, truncated, info = ppo_env.step(np_action)
-                # obs = obs[:168, ...]
-                ppo_env.render()
-                # action = action.unsqueeze(0)
-                prev_action = batch["action"].unsqueeze(0)
-                prev_obs = batch["observation.images.front"]
-                ppo_step += 1
-                timestamp = ppo_step / cfg.env.fps
-                norm_obs = obs/255.0
-                # batch = {
-                #     "observation.images.front": torch.tensor(norm_obs).unsqueeze(0).to(device).permute(0,3,1,2),
-                #     "action": action.detach().clone().to(device),
-                #     "observation.state": prev_action.detach().clone().to(device),  # just a placeholder
-                #     "timestamp": torch.tensor(timestamp).unsqueeze(0).unsqueeze(0).to(device),
-                #     "frame_index": torch.tensor(ppo_step).unsqueeze(0).unsqueeze(0).to(device),
-                #     "episode_index": torch.tensor(0).unsqueeze(0).unsqueeze(0).to(device),
-                #     "index": torch.tensor(ppo_step).unsqueeze(0).unsqueeze(0).to(device),
-                #     "task_index": torch.tensor(0).unsqueeze(0).unsqueeze(0).to(device),
-                #     "action_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
-                #     "observation.state_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
-                #     "observation.images.front_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
-                #     "task": ["Drive on the road."],
-                # }
-                batch = {
-                    "observation.images.front": torch.tensor(norm_obs).unsqueeze(0).to(device).permute(0,3,1,2),
-                    "action": action.detach().clone().to(device),
-                    "observation.state": prev_action.detach().clone().to(device),  # just a placeholder
-                    "timestamp": torch.tensor(timestamp).unsqueeze(0).unsqueeze(0).to(device),
-                    "frame_index": torch.tensor(ppo_step).unsqueeze(0).unsqueeze(0).to(device),
-                    "episode_index": torch.tensor(0).unsqueeze(0).unsqueeze(0).to(device),
-                    "index": torch.tensor(ppo_step).unsqueeze(0).unsqueeze(0).to(device),
-                    "task_index": torch.tensor(0).unsqueeze(0).unsqueeze(0).to(device),
-                    "action_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
-                    "observation.state_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
-                    "observation.images.front_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
-                    "task": ["Drive on the road."],
-                }
-                for k in batch:
-                    if k == "task":
-                        continue
-                    if batch[k].isnan().any():
-                        print("DEBUG: NaN in batch key", k)
-                transition = {
-                                "obs": prev_obs.permute(0,2,3,1).squeeze(0).detach().cpu(),
-                                "action": action.squeeze(0).squeeze(0).squeeze(0).detach().cpu(),
-                                "reward": reward,
-                                "done": terminated,
-                                "log_prob": log_prob.detach().cpu(),
-                                "value": value.detach().cpu(),
-                                "timestamp": timestamp,
-                                "frame_index": ppo_step,
-                                "episode_index": 0,
-                                "index": ppo_step,
-                                "task_index": 0,
-                                "action_is_pad": torch.tensor(False).unsqueeze(0),
-                                "state_is_pad": torch.tensor(False).unsqueeze(0),
-                                "image_is_pad": torch.tensor(False).unsqueeze(0),
-                                "task": "Drive on the road.",
-                             }
-                rollout_buffer.add(**transition)
-                if rollout_buffer.ptr >= rollout_buffer.buffer_size:
-                    print("DEBUG: Performing PPO update from rollout buffer")
-                    # compute GAE advantages
-                    with torch.no_grad():
-                        next_value = policy.get_value(batch).squeeze(0)
-                    rewards = rollout_buffer.rewards
-                    values = rollout_buffer.values
-                    print("DEBUG:", values)
-                    dones = rollout_buffer.dones
-                    advantages = compute_gae(rewards, values, dones, next_value)
-                    # print("DEBUG: advantages mean", advantages.mean())
-                    # print("DEBUG: advantages std", advantages.std())
-                    returns = advantages + values
-                    # Normalize advantages
-                    advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
-
-                    # print("DEBUG: rewards mean", returns.mean())
-                    # print("DEBUG: rewards std", returns.std())
-                    # PPO update loop
-                    ppo_batch_size = 32
-                    ppo_epochs = 4
-                    for epoch in range(ppo_epochs):
-                        for start in range(0, rollout_buffer.buffer_size, ppo_batch_size):
-                            end = start + ppo_batch_size
-                            mbatch_ppo = rollout_buffer.get_ppo_batch(start, end)
-                            for k in mbatch_ppo:
-                                if isinstance(mbatch_ppo[k], torch.Tensor):
-                                    mbatch_ppo[k] = mbatch_ppo[k].to(device)
-                            for k in mbatch_ppo:
-                                if k == "task":
-                                    continue
-                                if mbatch_ppo[k].isnan().any():
-                                    print("DEBUG: NaN in mbatch_ppo key", k)
-                            mbatch_smolvla = rollout_buffer.get_smolvla_batch(start, end)
-                            for k in mbatch_smolvla:
-                                if isinstance(mbatch_smolvla[k], torch.Tensor):
-                                    mbatch_smolvla[k] = mbatch_smolvla[k].unsqueeze(0).to(device)
-                            for k in mbatch_smolvla:
-                                if k == "task":
-                                    continue
-                                if mbatch_smolvla[k].isnan().any():
-                                    print("DEBUG: NaN in mbatch_smolvla key", k)
-                            mbatch = {**mbatch_ppo, **mbatch_smolvla}
-                            mbatch["advantages"] = advantages[start:end]
-                            mbatch["returns"] = returns[start:end]
-                            mbatch["device"] = device
-                            print("DEBUG: PPO minibatch from", start, "to", end)
-                            # mbatch.to(device)
-                            train_tracker, output_dict = update_policy_ppo(
-                                train_tracker,
-                                policy,
-                                mbatch,
-                                optimizer,
-                                0.1,
-                                # cfg.optimizer.grad_clip_norm,
-                                grad_scaler=grad_scaler,
-                                lr_scheduler=lr_scheduler,
-                                use_amp=cfg.policy.use_amp,
                             )
                         logging.info(train_tracker)
                         if wandb_logger:
@@ -834,7 +884,7 @@ def train(cfg: TrainPipelineConfig):
                 done = terminated or truncated  
             print("DEBUG: PPO episode done", done)
             step += 1
-            continue
+            break  # After one DRL/PPO step, break to return to SFT (offline) training does not work right now
 
         start_time = time.perf_counter()
         batch = next(dl_iter)
