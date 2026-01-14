@@ -280,14 +280,14 @@ class CarRacingEnvConfig(EnvConfig):
     episode_length: int = 1000
     render_mode: str = "rgb_array"
     continuous: bool = True
-    track_style: str = "NASCAR"
+    track_style: str = "default"
     num_checkpoints: int = 12
-    view: str = "center"
+    view: str = "car"
     features: dict[str, PolicyFeature] = field(
         default_factory=lambda: {
             "action": PolicyFeature(type=FeatureType.ACTION, shape=(3,)),
             "observation.state": PolicyFeature(type=FeatureType.STATE, shape=(3,)),
-            "observation.image": PolicyFeature(type=FeatureType.VISUAL, shape=(512, 512, 3)),
+            "observation.image": PolicyFeature(type=FeatureType.VISUAL, shape=(192, 160, 3)),
         }
     )
     features_map: dict[str, str] = field(

@@ -295,6 +295,7 @@ def train(cfg: TrainPipelineConfig):
     eval_env = None
     if cfg.eval_freq > 0 and cfg.env is not None:
         logging.info("Creating env")
+        print("DEBUG:", cfg.eval.batch_size)
         eval_env = make_env(cfg.env, n_envs=cfg.eval.batch_size, use_async_envs=cfg.eval.use_async_envs)
 
     print("[DEBUG] Creating policy")
@@ -637,10 +638,7 @@ def train(cfg: TrainPipelineConfig):
             for name, param in policy.named_parameters():
                 if "actor_head" in name:
                     param.requires_grad = True
-                    print("DEBUG: Enabling gradient for", name)
-                else:
-                    param.requires_grad = False
-                    print("DEBUG: Disabling gradient for", name)
+                    # print("DEBUG: Enabling gradient for", name)
                     
             head_params = []
             for name, param in policy.named_parameters():
@@ -664,9 +662,9 @@ def train(cfg: TrainPipelineConfig):
             norm_obs = obs/255.0
             # print("DEBUG:", norm_obs)
             batch = {
-                    "observation.images.front": torch.tensor(norm_obs).unsqueeze(0).to(device).permute(0,3,1,2),
-                    "action": torch.zeros((1, ppo_env.action_space.shape[0])).unsqueeze(0).to(device),
-                    "observation.state": torch.zeros((1,ppo_env.action_space.shape[0])).unsqueeze(0).to(device),
+                    "observation.images.front": torch.tensor(norm_obs).to(device).permute(0,3,1,2),
+                    "action": torch.zeros((1, ppo_env.action_space.shape[1])).to(device),
+                    "observation.state": torch.zeros((1,ppo_env.action_space.shape[1])).to(device),
                     "timestamp": torch.tensor(timestamp).unsqueeze(0).unsqueeze(0).to(device),
                     "frame_index": torch.tensor(ppo_step).unsqueeze(0).unsqueeze(0).to(device),
                     "episode_index": torch.tensor(0).unsqueeze(0).unsqueeze(0).to(device),
@@ -697,9 +695,9 @@ def train(cfg: TrainPipelineConfig):
                     done = False
                     norm_obs = obs/255.0
                     batch = {
-                    "observation.images.front": torch.tensor(norm_obs).unsqueeze(0).to(device).permute(0,3,1,2),
-                    "action": torch.zeros((1, ppo_env.action_space.shape[0])).unsqueeze(0).to(device),
-                    "observation.state": torch.zeros((1,ppo_env.action_space.shape[0])).unsqueeze(0).to(device),
+                    "observation.images.front": torch.tensor(norm_obs).to(device).permute(0,3,1,2),
+                    "action": torch.zeros((1, ppo_env.action_space.shape[1])).to(device),
+                    "observation.state": torch.zeros((1,ppo_env.action_space.shape[1])).to(device),
                     "timestamp": torch.tensor(timestamp).unsqueeze(0).unsqueeze(0).to(device),
                     "frame_index": torch.tensor(ppo_step).unsqueeze(0).unsqueeze(0).to(device),
                     "episode_index": torch.tensor(0).unsqueeze(0).unsqueeze(0).to(device),
@@ -723,6 +721,7 @@ def train(cfg: TrainPipelineConfig):
                 raw_action = dists.rsample()
                 # map action to environment friendly range of [(-1,1),(0,1),(0,1)]
                 action = torch.zeros(batch["action"].size())
+                print(action.size())
                 action[..., 0] = torch.tanh(raw_action[..., 0])
                 action[..., 1:] = torch.sigmoid(raw_action[..., 1:])
                 # calculate log_probs
@@ -749,8 +748,8 @@ def train(cfg: TrainPipelineConfig):
                 # TODO: Calculate log_prob etc. for PPO
                 # TODO: Store transition in replay buffer
                 # TODO: Perform PPO update steps
-
-                np_action = action.squeeze(0).squeeze(0).detach().numpy()
+                np_action = action.detach().numpy()
+                print("DEBUG: Taking action in PPO env:", np_action)
                 obs, reward, terminated, truncated, info = ppo_env.step(np_action)
                 # obs = obs[:168, ...]
                 ppo_env.render()
@@ -775,7 +774,7 @@ def train(cfg: TrainPipelineConfig):
                 #     "task": ["Drive on the road."],
                 # }
                 batch = {
-                    "observation.images.front": torch.tensor(norm_obs).unsqueeze(0).to(device).permute(0,3,1,2),
+                    "observation.images.front": torch.tensor(norm_obs).to(device).permute(0,3,1,2),
                     "action": action.detach().clone().to(device),
                     "observation.state": prev_action.detach().clone().to(device),  # just a placeholder
                     "timestamp": torch.tensor(timestamp).unsqueeze(0).unsqueeze(0).to(device),
@@ -793,6 +792,8 @@ def train(cfg: TrainPipelineConfig):
                         continue
                     if batch[k].isnan().any():
                         print("DEBUG: NaN in batch key", k)
+                        
+                # TODO: Put the scalars into tensors in the transition
                 transition = {
                                 "obs": prev_obs.permute(0,2,3,1).squeeze(0).detach().cpu(),
                                 "action": action.squeeze(0).squeeze(0).squeeze(0).detach().cpu(),
@@ -812,7 +813,7 @@ def train(cfg: TrainPipelineConfig):
                              }
                 rollout_buffer.add(**transition)
                 print("DEBUG: Transition added to rollout buffer. Current ptr:", rollout_buffer.ptr)
-                if rollout_buffer.ptr >= rollout_buffer.buffer_size:
+            if rollout_buffer.ptr >= rollout_buffer.buffer_size:
                     print("DEBUG: Performing PPO update from rollout buffer")
                     # compute GAE advantages
                     with torch.no_grad():
@@ -881,10 +882,15 @@ def train(cfg: TrainPipelineConfig):
                     rollout_buffer.reset()
 
                 # policy.forward(batch)  # to potentially update internal buffers
-                done = terminated or truncated  
+            done = terminated or truncated  
             print("DEBUG: PPO episode done", done)
             step += 1
-            break  # After one DRL/PPO step, break to return to SFT (offline) training does not work right now
+            for name, param in policy.named_parameters():
+                if "actor_head" in name:
+                    param.requires_grad = False
+                else:
+                    param.requires_grad = True
+            continue  # After one DRL/PPO step, break to return to SFT (offline) training does not work right now
 
         start_time = time.perf_counter()
         batch = next(dl_iter)

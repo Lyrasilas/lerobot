@@ -56,7 +56,9 @@ def make_env(cfg: EnvConfig, n_envs: int = 1, use_async_envs: bool = False) -> g
 
     package_name = f"gym_{cfg.type}"
     try: 
-        return gym.make(cfg.task, render_mode=cfg.render_mode, continuous=cfg.continuous, track_style=cfg.track_style, view=cfg.view)
+        env = gym.make(cfg.task, render_mode=cfg.render_mode, continuous=cfg.continuous, track_style=cfg.track_style, view=cfg.view)
+        vec_env = gym.vector.SyncVectorEnv([lambda: env for _ in range(n_envs)])
+        return vec_env
     except Exception:
         print("Could not create standard gym environment")
         pass
