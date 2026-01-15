@@ -703,6 +703,13 @@ class VLAFlowMatching(nn.Module):
         self.actor_head_mean_proj = nn.Linear(self.vlm_with_expert.expert_hidden_size, self.config.max_action_dim)
         self.actor_head_logstd_proj = nn.Linear(self.vlm_with_expert.expert_hidden_size, self.config.max_action_dim)
         self.actor_head_value_proj = nn.Linear(self.vlm_with_expert.expert_hidden_size, 1)
+
+        # # Register forward hooks for debugging
+        # def hook_fn(module, input, output):
+        #     print(f"[HOOK] {module.__class__.__name__} was used in forward pass")
+        # self.actor_head_mean_proj.register_forward_hook(hook_fn)
+        # self.actor_head_logstd_proj.register_forward_hook(hook_fn)
+        # self.actor_head_value_proj.register_forward_hook(hook_fn)
         
         nn.init.orthogonal_(self.actor_head_value_proj.weight, gain=1.0)
         nn.init.zeros_(self.actor_head_value_proj.bias)
@@ -711,13 +718,6 @@ class VLAFlowMatching(nn.Module):
         nn.init.normal_(self.actor_head_logstd_proj.weight, mean=0.0, std=0.01)
         nn.init.zeros_(self.actor_head_logstd_proj.bias)
         
-
-        # # Register forward hooks for debugging
-        # def hook_fn(module, input, output):
-        #     print(f"[HOOK] {module.__class__.__name__} was used in forward pass")
-        # self.actor_head_mean_proj.register_forward_hook(hook_fn)
-        # self.actor_head_logstd_proj.register_forward_hook(hook_fn)
-        # self.actor_head_value_proj.register_forward_hook(hook_fn)
 
         self.action_time_mlp_in = nn.Linear(
             self.vlm_with_expert.expert_hidden_size * 2, self.vlm_with_expert.expert_hidden_size

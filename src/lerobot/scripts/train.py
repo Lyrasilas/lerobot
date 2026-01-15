@@ -83,6 +83,8 @@ import gymnasium as gym
 
 from collections import namedtuple
 
+import torch.nn.functional as F
+
 
 from lerobot.configs import parser
 from lerobot.configs.train import TrainPipelineConfig
@@ -130,11 +132,29 @@ def update_policy(
     policy.train()
     with torch.autocast(device_type=device.type) if use_amp else nullcontext():
         # print("DEBUG: batch action size", batch["action"].shape)
-        loss, output_dict, _, _, _ = policy.forward(batch)
+        loss, output_dict, mean, std, value = policy.forward(batch)
         # TODO(rcadene): policy.unnormalize_outputs(out_dict)
     # print("DEBUG: look at output_dict to potentially put into replay buffer", output_dict)
-    grad_scaler.scale(loss).backward()
-
+    mean_aux = F.mse_loss(mean, batch["action"], reduction="mean")
+    std_aux = F.mse_loss(std, torch.zeros_like(std), reduction="mean")
+    value_aux = F.mse_loss(value, torch.zeros_like(value), reduction="mean")
+    aux_loss = (
+        mean_aux
+        + 0.01 * std_aux
+        + 0.01 * value_aux  # if you use value loss
+    )
+    print("DEBUG: main loss", loss)
+    print("DEBUG: aux loss", aux_loss)
+    print("DEBUG: aux loss is {perc:.2f}% of main loss".format(perc=aux_loss.item() * 100 / (loss.item() + 1e-8)))
+    full_loss = loss + aux_loss
+    print("DEBUG: full loss", full_loss)
+    grad_scaler.scale(full_loss).backward()
+    
+    # for name, param in policy.named_parameters():
+    #     if param.grad is None:
+    #         print(f"{name}: grad is None (not used in backward)")
+    #     elif (param.grad == 0).all():
+    #         print(f"{name}: grad is all zeros (not updated)")
     # Unscale the gradient of the optimizer's assigned params in-place **prior to gradient clipping**.
     grad_scaler.unscale_(optimizer)
 
@@ -305,7 +325,7 @@ def train(cfg: TrainPipelineConfig):
         ds_meta=dataset.meta,
     )
     print("[DEBUG] Policy created")
-    
+
     print("[DEBUG] Creating optimizer and scheduler")
     logging.info("Creating optimizer and scheduler")
     optimizer, lr_scheduler = make_optimizer_and_scheduler(cfg, policy)
@@ -617,11 +637,6 @@ def train(cfg: TrainPipelineConfig):
 
     print("[DEBUG] Starting training loop")
     logging.info("Start offline training on a fixed dataset")
-    for name, param in policy.named_parameters():
-            if "actor_head" in name:
-                param.requires_grad = False
-            else:
-                param.requires_grad = True
                 
     for _ in range(step, cfg.steps):
         
@@ -645,7 +660,9 @@ def train(cfg: TrainPipelineConfig):
                 if "actor_head" in name:
                     head_params.append(param)
             print("DEBUG: Creating head optimizer for DRL step", head_params)
-            head_optimizer = torch.optim.AdamW(head_params, lr=3e-4, weight_decay=1e-2)
+            head_optimizer = cfg.optimizer.build(head_params)
+            ppo_lr_scheduler = cfg.scheduler.build(head_optimizer, cfg.steps)
+            # head_optimizer = torch.optim.AdamW(head_params, lr=3e-4, weight_decay=1e-2)
             # # print_live_cuda_tensors()
             # prev_tensors = get_cuda_tensor_ids()
             # print_new_cuda_tensors(prev_tensors)
@@ -797,15 +814,15 @@ def train(cfg: TrainPipelineConfig):
                 transition = {
                                 "obs": prev_obs.permute(0,2,3,1).squeeze(0).detach().cpu(),
                                 "action": action.squeeze(0).squeeze(0).squeeze(0).detach().cpu(),
-                                "reward": reward,
-                                "done": terminated,
+                                "reward": torch.as_tensor(reward),
+                                "done": torch.as_tensor(terminated),
                                 "log_prob": log_prob.detach().cpu(),
                                 "value": value.detach().cpu(),
-                                "timestamp": timestamp,
-                                "frame_index": ppo_step,
-                                "episode_index": 0,
-                                "index": ppo_step,
-                                "task_index": 0,
+                                "timestamp": torch.as_tensor(timestamp),
+                                "frame_index": torch.as_tensor(ppo_step),
+                                "episode_index": torch.as_tensor(0),
+                                "index": torch.as_tensor(ppo_step),
+                                "task_index": torch.as_tensor(0),
                                 "action_is_pad": torch.tensor(False).unsqueeze(0),
                                 "state_is_pad": torch.tensor(False).unsqueeze(0),
                                 "image_is_pad": torch.tensor(False).unsqueeze(0),
@@ -869,7 +886,7 @@ def train(cfg: TrainPipelineConfig):
                                 0.1,
                                 # cfg.optimizer.grad_clip_norm,
                                 grad_scaler=grad_scaler,
-                                lr_scheduler=lr_scheduler,
+                                lr_scheduler=ppo_lr_scheduler,
                                 use_amp=cfg.policy.use_amp,
                             )
                         logging.info(train_tracker)
