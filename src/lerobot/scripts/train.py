@@ -143,13 +143,13 @@ def update_policy(
         + 0.01 * std_aux
         + 0.01 * value_aux  # if you use value loss
     )
-    print("DEBUG: main loss", loss)
-    print("DEBUG: aux loss", aux_loss)
-    print("DEBUG: aux loss is {perc:.2f}% of main loss".format(perc=aux_loss.item() * 100 / (loss.item() + 1e-8)))
+    # print("DEBUG: main loss", loss)
+    # print("DEBUG: aux loss", aux_loss)
+    # print("DEBUG: aux loss is {perc:.2f}% of main loss".format(perc=aux_loss.item() * 100 / (loss.item() + 1e-8)))
     full_loss = loss + aux_loss
-    print("DEBUG: full loss", full_loss)
+    # print("DEBUG: full loss", full_loss)
     grad_scaler.scale(full_loss).backward()
-    
+
     # for name, param in policy.named_parameters():
     #     if param.grad is None:
     #         print(f"{name}: grad is None (not used in backward)")
@@ -216,7 +216,7 @@ def update_policy_ppo(
     grad_scaler.unscale_(optimizer)
 
     print("DEBUG:", grad_clip_norm)
-    
+
     grad_norm = torch.nn.utils.clip_grad_norm_(
         policy.parameters(),
         grad_clip_norm,
@@ -299,7 +299,7 @@ def train(cfg: TrainPipelineConfig):
 
     logging.info("Creating dataset")
     dataset = make_dataset(cfg)
-    
+
     logging.info("Creating rollout buffer")
     rollout_buffer = RolloutBufferTorch(
         buffer_size=cfg.replay_capacity,
@@ -405,14 +405,14 @@ def train(cfg: TrainPipelineConfig):
     #         param.requires_grad = True
     #     else:
     #         param.requires_grad = False
-            
+
     # head_params = []
     # for name, param in policy.named_parameters():
     #     if "actor_head" in name:
     #         head_params.append(param)
-            
+
     # head_optimizer = torch.optim.AdamW(head_params, lr=3e-4, weight_decay=1e-2)
-    
+
     # for warmup_step in range(1000):
     #         ppo_env = make_env(cfg.env)
     #         obs, info = ppo_env.reset()
@@ -456,18 +456,18 @@ def train(cfg: TrainPipelineConfig):
     #             dists, value = policy.get_action_distributions(batch)
     #             # sample action
     #             raw_action = dists.rsample()
-                
+
     #             penalty_0 = ((raw_action[..., 0] < -1).float() * (-1 - raw_action[..., 0]).pow(2) + (raw_action[..., 0] > 1).float() * (raw_action[..., 0] - 1).pow(2))
     #             penalty_rest = ((raw_action[..., 1:] < 0).float() * (0 - raw_action[..., 1:]).pow(2) + (raw_action[..., 1:] > 1).float() * (raw_action[..., 1:] - 1).pow(2))
     #             penalty = penalty_0.mean() + penalty_rest.mean()
-                
+
     #             # map action to environment friendly range of [(-1,1),(0,1),(0,1)]
     #             action = torch.zeros(batch["action"].size())
     #             action[..., 0] = torch.tanh(raw_action[..., 0])
     #             action[..., 1:] = torch.sigmoid(raw_action[..., 1:])
     #             # calculate log_probs
     #             log_probs = dists.log_prob(raw_action)
-    #             if (raw_action >= 100).any() or (raw_action <= -100).any(): 
+    #             if (raw_action >= 100).any() or (raw_action <= -100).any():
     #                 print("DEBUG: raw_action", raw_action)
     #                 print("DEBUG: action", value)
     #             if log_probs.isnan().any():
@@ -622,24 +622,24 @@ def train(cfg: TrainPipelineConfig):
     #                 rollout_buffer.reset()
 
     #             # policy.forward(batch)  # to potentially update internal buffers
-    #             done = terminated or truncated  
+    #             done = terminated or truncated
     #         print("DEBUG: PPO episode done", done)
     #         warmup_step += 1
     #         if warmup_step % 100 == 0:
     #             logging.info(f"--------------- PPO head warmup step {warmup_step} ----------------")
     # for param in policy.parameters():
     #     param.requires_grad = True
-    
+
     # optimizer, lr_scheduler = make_optimizer_and_scheduler(cfg, policy)
     # grad_scaler = GradScaler(device.type, enabled=cfg.policy.use_amp)
-    
+
     # logging.info("PPO layer warmup completed")
 
     print("[DEBUG] Starting training loop")
     logging.info("Start offline training on a fixed dataset")
-                
+
     for _ in range(step, cfg.steps):
-        
+
         # prev_tensors = get_cuda_tensor_ids()
         # # ... your training step code ...
         # # Existing code for training step goes here
@@ -654,7 +654,7 @@ def train(cfg: TrainPipelineConfig):
                 if "actor_head" in name:
                     param.requires_grad = True
                     # print("DEBUG: Enabling gradient for", name)
-                    
+
             head_params = []
             for name, param in policy.named_parameters():
                 if "actor_head" in name:
@@ -743,7 +743,7 @@ def train(cfg: TrainPipelineConfig):
                 action[..., 1:] = torch.sigmoid(raw_action[..., 1:])
                 # calculate log_probs
                 log_probs = dists.log_prob(raw_action)
-                if (raw_action >= 100).any() or (raw_action <= -100).any(): 
+                if (raw_action >= 100).any() or (raw_action <= -100).any():
                     print("DEBUG: raw_action", raw_action)
                     print("DEBUG: action", value)
                 if log_probs.isnan().any():
@@ -809,7 +809,7 @@ def train(cfg: TrainPipelineConfig):
                         continue
                     if batch[k].isnan().any():
                         print("DEBUG: NaN in batch key", k)
-                        
+
                 # TODO: Put the scalars into tensors in the transition
                 transition = {
                                 "obs": prev_obs.permute(0,2,3,1).squeeze(0).detach().cpu(),
@@ -899,7 +899,7 @@ def train(cfg: TrainPipelineConfig):
                     rollout_buffer.reset()
 
                 # policy.forward(batch)  # to potentially update internal buffers
-            done = terminated or truncated  
+            done = terminated or truncated
             print("DEBUG: PPO episode done", done)
             step += 1
             for name, param in policy.named_parameters():
@@ -915,7 +915,7 @@ def train(cfg: TrainPipelineConfig):
         for key in batch:
             if isinstance(batch[key], torch.Tensor):
                 batch[key] = batch[key].to(device, non_blocking=device.type == "cuda")
-        
+
         train_tracker, output_dict = update_policy(
             train_tracker,
             policy,
@@ -985,9 +985,9 @@ def train(cfg: TrainPipelineConfig):
                 wandb_logger.log_dict(wandb_log_dict, step, mode="eval")
                 wandb_logger.log_video(eval_info["video_paths"][0], step, mode="eval")
 
-        
-            
-            
+
+
+
             episode_rewards = []
             logging.info(f"DRL episode reward: {sum(episode_rewards):.2f}")
 
@@ -1021,7 +1021,7 @@ def compute_gae(rewards, values, dones, next_value, gamma=0.99, lam=0.95):
         gae = delta + gamma * lam * (1 - dones_f[t]) * gae
         advantages[t] = gae
     return advantages
-    
+
 
 def main():
     init_logging()
