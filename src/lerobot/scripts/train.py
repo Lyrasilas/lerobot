@@ -1,52 +1,3 @@
-import gc
-import torch
-
-# from tests.envs.mujoco.test_mujoco_rendering import model
-
-def get_cuda_tensor_ids():
-    return {id(obj): obj for obj in gc.get_objects() if torch.is_tensor(obj) and obj.is_cuda}
-
-def print_new_cuda_tensors(prev_tensors):
-    curr_tensors = get_cuda_tensor_ids()
-    new_ids = set(curr_tensors.keys()) - set(prev_tensors.keys())
-    print("New CUDA tensors added this step:")
-    for tid in new_ids:
-        t = curr_tensors[tid]
-        print(f"ID: {tid}, Tensor: {t.shape}, dtype: {t.dtype}, size: {t.element_size() * t.nelement() / 1024**2:.2f} MB, requires_grad: {t.requires_grad}")
-
-# Example usage in your training loop:
-# prev_tensors = get_cuda_tensor_ids()
-# ... training step ...
-# print_new_cuda_tensors(prev_tensors)
-import torch
-import gc
-# ...existing code...
-# After buffer/model creation, add memory usage reporting
-def report_gpu_memory(buffer=None):
-    print("Total GPU memory allocated:", torch.cuda.memory_allocated() / 1024**2, "MB")
-    print("Total GPU memory reserved:", torch.cuda.memory_reserved() / 1024**2, "MB")
-    for obj in gc.get_objects():
-        if torch.is_tensor(obj) and obj.is_cuda:
-            print(f"Tensor: {obj.shape}, dtype: {obj.dtype}, size: {obj.element_size() * obj.nelement() / 1024**2:.2f} MB")
-    if buffer is not None:
-        for name, tensor in buffer.__dict__.items():
-            if torch.is_tensor(tensor) and tensor.is_cuda:
-                print(f"Buffer field {name}: {tensor.shape}, {tensor.element_size() * tensor.nelement() / 1024**2:.2f} MB")
-
-import gc
-import torch
-
-def print_live_cuda_tensors():
-    print("Live CUDA tensors after step:")
-    for obj in gc.get_objects():
-        try:
-            if torch.is_tensor(obj) and obj.is_cuda:
-                print(f"Tensor: {obj.shape}, dtype: {obj.dtype}, size: {obj.element_size() * obj.nelement() / 1024**2:.2f} MB, requires_grad: {obj.requires_grad}")
-        except Exception:
-            pass
-
-# Example usage after buffer/model creation:
-# report_gpu_memory(buffer)
 #!/usr/bin/env python
 
 # Copyright 2024 The HuggingFace Inc. team. All rights reserved.
@@ -208,14 +159,14 @@ def update_policy_ppo(
         # TODO(rcadene): policy.unnormalize_outputs(out_dict)
         # if penalty is not None:
         #     loss_clip += penalty * 0.1  # penalty coefficient
-        print("DEBUG: PPO total loss", loss_clip)
+        # print("DEBUG: PPO total loss", loss_clip)
     grad_scaler.scale(loss_clip).backward()
 
     # Unscale the gradient of the optimizer's assigned params in-place **prior to gradient clipping**.
-    print("DEBUG: Optimizer", optimizer)
+    # print("DEBUG: Optimizer", optimizer)
     grad_scaler.unscale_(optimizer)
 
-    print("DEBUG:", grad_clip_norm)
+    # print("DEBUG:", grad_clip_norm)
 
     grad_norm = torch.nn.utils.clip_grad_norm_(
         policy.parameters(),
@@ -274,7 +225,7 @@ def ppo_clip_loss(policy, batch, clip_epsilon=0.2, value_coef=0.5, entropy_coef=
     entropy_loss = -entropy_coef * entropy.mean()
     # Total loss
     loss = policy_loss + value_loss + entropy_loss
-    print("DEBUG: PPO LOSS", loss)
+    # print("DEBUG: PPO LOSS", loss)
     return loss, {"ppo_loss":loss.item() ,"policy_loss": policy_loss.item(), "value_loss": value_loss.item(), "entropy_loss": entropy_loss.item()}
 
 @parser.wrap()
@@ -307,7 +258,7 @@ def train(cfg: TrainPipelineConfig):
         action_shape=dataset.features["action"]["shape"],
         device="cpu",
     )
-    print("rollout_buffer", rollout_buffer.device)
+    # print("rollout_buffer", rollout_buffer.device)
 
     # Create environment used for evaluating checkpoints during training on simulation data.
     # On real-world data, no need to create an environment as evaluations are done outside train.py,
@@ -315,7 +266,7 @@ def train(cfg: TrainPipelineConfig):
     eval_env = None
     if cfg.eval_freq > 0 and cfg.env is not None:
         logging.info("Creating env")
-        print("DEBUG:", cfg.eval.batch_size)
+        # print("DEBUG:", cfg.eval.batch_size)
         eval_env = make_env(cfg.env, n_envs=cfg.eval.batch_size, use_async_envs=cfg.eval.use_async_envs)
 
     print("[DEBUG] Creating policy")
@@ -648,7 +599,7 @@ def train(cfg: TrainPipelineConfig):
         # print("-----------------------------------------------------------------------------------------------------------"))
         is_DRL_step = cfg.DRL_freq > 0 and step > 0 and  step % cfg.DRL_freq == 0
         # is_DRL_step = cfg.DRL_freq > 0 and step % cfg.DRL_freq == 0
-        print(step, is_DRL_step)
+        # print(step, is_DRL_step)
         if is_DRL_step and step > 0:
             for name, param in policy.named_parameters():
                 if "actor_head" in name:
@@ -659,7 +610,7 @@ def train(cfg: TrainPipelineConfig):
             for name, param in policy.named_parameters():
                 if "actor_head" in name:
                     head_params.append(param)
-            print("DEBUG: Creating head optimizer for DRL step", head_params)
+            # print("DEBUG: Creating head optimizer for DRL step", head_params)
             head_optimizer = cfg.optimizer.build(head_params)
             ppo_lr_scheduler = cfg.scheduler.build(head_optimizer, cfg.steps)
             # head_optimizer = torch.optim.AdamW(head_params, lr=3e-4, weight_decay=1e-2)
@@ -703,7 +654,7 @@ def train(cfg: TrainPipelineConfig):
             # while not done:
             while rollout_buffer.ptr < rollout_buffer.buffer_size:
                 if done:
-                    print("DEBUG: PPO episode done", done)
+                    # print("DEBUG: PPO episode done", done)
                     obs, info = ppo_env.reset()
                     # obs = obs[:168, ...]
                     ppo_env.render()
@@ -730,7 +681,7 @@ def train(cfg: TrainPipelineConfig):
                 # print_new_cuda_tensors(prev_tensors)
                 # prev_tensors = get_cuda_tensor_ids()
                 # # print_live_cuda_tensors()
-                print("------------------------------------------------DEBUG: PPO step------------------------------------------------")
+                # print("------------------------------------------------DEBUG: PPO step------------------------------------------------")
                 # print("DEBUG: PPO step start", ppo_step)
                 # get action distributions for further calcs
                 dists, value = policy.get_action_distributions(batch)
@@ -738,7 +689,7 @@ def train(cfg: TrainPipelineConfig):
                 raw_action = dists.rsample()
                 # map action to environment friendly range of [(-1,1),(0,1),(0,1)]
                 action = torch.zeros(batch["action"].size())
-                print(action.size())
+                # print(action.size())
                 action[..., 0] = torch.tanh(raw_action[..., 0])
                 action[..., 1:] = torch.sigmoid(raw_action[..., 1:])
                 # calculate log_probs
@@ -837,7 +788,7 @@ def train(cfg: TrainPipelineConfig):
                         next_value = policy.get_value(batch).squeeze(0)
                     rewards = rollout_buffer.rewards
                     values = rollout_buffer.values
-                    print("DEBUG:", values)
+                    # print("DEBUG:", values)
                     dones = rollout_buffer.dones
                     advantages = compute_gae(rewards, values, dones, next_value)
                     # print("DEBUG: advantages mean", advantages.mean())
