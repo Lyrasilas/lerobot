@@ -631,8 +631,8 @@ def train(cfg: TrainPipelineConfig):
             # print("DEBUG:", norm_obs)
             batch = {
                     "observation.images.front": torch.tensor(norm_obs).to(device).permute(0,3,1,2),
-                    "action": torch.zeros((1, ppo_env.action_space.shape[1])).to(device),
-                    "observation.state": torch.zeros((1,ppo_env.action_space.shape[1])).to(device),
+                    "action": torch.zeros((1, ppo_env.action_space.shape[1])).unsqueeze(0).to(device),
+                    "observation.state": torch.zeros((1,ppo_env.action_space.shape[1])).unsqueeze(0).to(device),
                     "timestamp": torch.tensor(timestamp).unsqueeze(0).unsqueeze(0).to(device),
                     "frame_index": torch.tensor(ppo_step).unsqueeze(0).unsqueeze(0).to(device),
                     "episode_index": torch.tensor(0).unsqueeze(0).unsqueeze(0).to(device),
@@ -664,8 +664,8 @@ def train(cfg: TrainPipelineConfig):
                     norm_obs = obs/255.0
                     batch = {
                     "observation.images.front": torch.tensor(norm_obs).to(device).permute(0,3,1,2),
-                    "action": torch.zeros((1, ppo_env.action_space.shape[1])).to(device),
-                    "observation.state": torch.zeros((1,ppo_env.action_space.shape[1])).to(device),
+                    "action": torch.zeros((1, ppo_env.action_space.shape[1])).unsqueeze(0).to(device),
+                    "observation.state": torch.zeros((1,ppo_env.action_space.shape[1])).unsqueeze(0).to(device),
                     "timestamp": torch.tensor(timestamp).unsqueeze(0).unsqueeze(0).to(device),
                     "frame_index": torch.tensor(ppo_step).unsqueeze(0).unsqueeze(0).to(device),
                     "episode_index": torch.tensor(0).unsqueeze(0).unsqueeze(0).to(device),
@@ -694,15 +694,15 @@ def train(cfg: TrainPipelineConfig):
                 action[..., 1:] = torch.sigmoid(raw_action[..., 1:])
                 # calculate log_probs
                 log_probs = dists.log_prob(raw_action)
-                if (raw_action >= 100).any() or (raw_action <= -100).any():
-                    print("DEBUG: raw_action", raw_action)
-                    print("DEBUG: action", value)
-                if log_probs.isnan().any():
-                    print("DEBUG: NaN in log_probs")
-                    print("DEBUG: log_probs", log_probs)
-                    print("DEBUG: raw_action", raw_action)
-                    print("DEBUG: dist", dists, value, action)
-                    exit(1)
+                # if (raw_action >= 100).any() or (raw_action <= -100).any():
+                #     print("DEBUG: raw_action", raw_action)
+                #     print("DEBUG: action", value)
+                # if log_probs.isnan().any():
+                #     print("DEBUG: NaN in log_probs")
+                #     print("DEBUG: log_probs", log_probs)
+                #     print("DEBUG: raw_action", raw_action)
+                #     print("DEBUG: dist", dists, value, action)
+                #     exit(1)
                 # mappings for log_probs and their use
                 tanh_jacobian = torch.log(1 - action[..., 0]**2 + 1e-6)
                 sigmoid_jacobian = action[..., 1:].log() + (1- action[..., 1:]).log()
@@ -716,8 +716,8 @@ def train(cfg: TrainPipelineConfig):
                 # TODO: Calculate log_prob etc. for PPO
                 # TODO: Store transition in replay buffer
                 # TODO: Perform PPO update steps
-                np_action = action.detach().numpy()
-                print("DEBUG: Taking action in PPO env:", np_action)
+                np_action = action.squeeze(0).detach().numpy()
+                # print("DEBUG: Taking action in PPO env:", np_action)
                 obs, reward, terminated, truncated, info = ppo_env.step(np_action)
                 # obs = obs[:168, ...]
                 ppo_env.render()
@@ -764,7 +764,7 @@ def train(cfg: TrainPipelineConfig):
                 # TODO: Put the scalars into tensors in the transition
                 transition = {
                                 "obs": prev_obs.permute(0,2,3,1).squeeze(0).detach().cpu(),
-                                "action": action.squeeze(0).squeeze(0).squeeze(0).detach().cpu(),
+                                "action": action.squeeze(0).squeeze(0).detach().cpu(),
                                 "reward": torch.as_tensor(reward),
                                 "done": torch.as_tensor(terminated),
                                 "log_prob": log_prob.detach().cpu(),
@@ -780,7 +780,7 @@ def train(cfg: TrainPipelineConfig):
                                 "task": "Drive on the road.",
                              }
                 rollout_buffer.add(**transition)
-                print("DEBUG: Transition added to rollout buffer. Current ptr:", rollout_buffer.ptr)
+                # print("DEBUG: Transition added to rollout buffer. Current ptr:", rollout_buffer.ptr)
             if rollout_buffer.ptr >= rollout_buffer.buffer_size:
                     print("DEBUG: Performing PPO update from rollout buffer")
                     # compute GAE advantages
@@ -801,7 +801,8 @@ def train(cfg: TrainPipelineConfig):
                     # print("DEBUG: rewards std", returns.std())
                     # PPO update loop
                     ppo_batch_size = 32
-                    ppo_epochs = 4
+                    ppo_epochs = get_scaled_ppo_epochs(step, cfg.steps)
+                    # ppo_epochs = 2
                     for epoch in range(ppo_epochs):
                         for start in range(0, rollout_buffer.buffer_size, ppo_batch_size):
                             end = start + ppo_batch_size
@@ -973,6 +974,10 @@ def compute_gae(rewards, values, dones, next_value, gamma=0.99, lam=0.95):
         advantages[t] = gae
     return advantages
 
+def get_scaled_ppo_epochs(step, max_steps, min_epochs=4, max_epochs=12):
+    # Linearly increase epochs from min_epochs to max_epochs
+    progress = min(step / max_steps, 1.0)
+    return int(min_epochs + (max_epochs - min_epochs) * progress)
 
 def main():
     init_logging()

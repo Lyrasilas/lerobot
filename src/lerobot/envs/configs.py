@@ -278,7 +278,7 @@ class CarRacingEnvConfig(EnvConfig):
     task: str | None = "CarRacing-v3"
     fps: int = 30
     episode_length: int = 1000
-    render_mode: str = "human"
+    render_mode: str = "rgb_array"
     continuous: bool = True
     track_style: str = "default"
     num_checkpoints: int = 12
