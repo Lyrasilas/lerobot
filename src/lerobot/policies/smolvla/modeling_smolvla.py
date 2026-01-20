@@ -943,7 +943,7 @@ class VLAFlowMatching(nn.Module):
         mean = mean[..., :3]
         logstd = logstd[..., :3]
         value = self.actor_head_value_proj(suffix_out)
-        print("DEBUG: ut_vt shapes", u_t.shape, v_t.shape)
+        # print("DEBUG: ut_vt shapes", u_t.shape, v_t.shape)
         losses = F.mse_loss(u_t, v_t, reduction="none")
         # print("DEBUG: losses", losses, losses.shape)
         std = torch.exp(logstd)
