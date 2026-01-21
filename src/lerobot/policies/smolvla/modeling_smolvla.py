@@ -936,6 +936,7 @@ class VLAFlowMatching(nn.Module):
         suffix_out = suffix_out[:, -self.config.chunk_size :]
         # Original openpi code, upcast attention output
         suffix_out = suffix_out.to(dtype=torch.float32)
+        print("DEBUG: suffix_out", suffix_out, suffix_out.shape)
         v_t = self.action_out_proj(suffix_out)
         # print("DEBUG: v_t", v_t, v_t.shape)
         mean = self.actor_head_mean_proj(suffix_out)
