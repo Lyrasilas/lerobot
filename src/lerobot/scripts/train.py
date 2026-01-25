@@ -974,7 +974,7 @@ def compute_gae(rewards, values, dones, next_value, gamma=0.99, lam=0.95):
         advantages[t] = gae
     return advantages
 
-def get_scaled_ppo_epochs(step, max_steps, min_epochs=4, max_epochs=12):
+def get_scaled_ppo_epochs(step, max_steps, min_epochs=12, max_epochs=32):
     # Linearly increase epochs from min_epochs to max_epochs
     progress = min(step / max_steps, 1.0)
     return int(min_epochs + (max_epochs - min_epochs) * progress)
