@@ -687,35 +687,35 @@ def train(cfg: TrainPipelineConfig):
                 dists, value = policy.get_action_distributions(batch)
                 # sample action
                 raw_action = dists.rsample()
-                # map action to environment friendly range of [(-1,1),(0,1),(0,1)]
-                action = torch.zeros(batch["action"].size())
-                # print(action.size())
-                action[..., 0] = torch.tanh(raw_action[..., 0])
-                action[..., 1:] = torch.sigmoid(raw_action[..., 1:])
+                # map action to environment friendly range using clipping
+                # Old version (tanh/sigmoid):
+                # action = torch.zeros(batch["action"].size())
+                # action[..., 0] = torch.tanh(raw_action[..., 0])
+                # action[..., 1:] = torch.sigmoid(raw_action[..., 1:])
+                # New version (clipping):
+                action_low = torch.tensor([-1.0, 0.0, 0.0], device=raw_action.device)
+                action_high = torch.tensor([1.0, 1.0, 1.0], device=raw_action.device)
+                action = torch.clamp(raw_action, action_low, action_high)
                 # calculate log_probs
                 log_probs = dists.log_prob(raw_action)
-                # if (raw_action >= 100).any() or (raw_action <= -100).any():
-                #     print("DEBUG: raw_action", raw_action)
-                #     print("DEBUG: action", value)
-                # if log_probs.isnan().any():
-                #     print("DEBUG: NaN in log_probs")
-                #     print("DEBUG: log_probs", log_probs)
-                #     print("DEBUG: raw_action", raw_action)
-                #     print("DEBUG: dist", dists, value, action)
-                #     exit(1)
-                # mappings for log_probs and their use
-                tanh_jacobian = torch.log(1 - action[..., 0]**2 + 1e-6)
-                sigmoid_jacobian = action[..., 1:].log() + (1- action[..., 1:]).log()
-                tanh_jacobian = tanh_jacobian.to(device)
-                sigmoid_jacobian = sigmoid_jacobian.to(device)
-                log_probs[..., 0] -= tanh_jacobian
-                log_probs[..., 1:] -= sigmoid_jacobian
+                # # if (raw_action >= 100).any() or (raw_action <= -100).any():
+                # #     print("DEBUG: raw_action", raw_action)
+                # #     print("DEBUG: action", value)
+                # # if log_probs.isnan().any():
+                # #     print("DEBUG: NaN in log_probs")
+                # #     print("DEBUG: log_probs", log_probs)
+                # #     print("DEBUG: raw_action", raw_action)
+                # #     print("DEBUG: dist", dists, value, action)
+                # #     exit(1)
+                # # mappings for log_probs and their use
+                # tanh_jacobian = torch.log(1 - action[..., 0]**2 + 1e-6)
+                # sigmoid_jacobian = action[..., 1:].log() + (1- action[..., 1:]).log()
+                # tanh_jacobian = tanh_jacobian.to(device)
+                # sigmoid_jacobian = sigmoid_jacobian.to(device)
+                # log_probs[..., 0] -= tanh_jacobian
+                # log_probs[..., 1:] -= sigmoid_jacobian
                 # sum to one log_prob
                 log_prob = log_probs.sum(-1)  # maybe change for larger batches
-                # TODO: Fix mask calculation
-                # TODO: Calculate log_prob etc. for PPO
-                # TODO: Store transition in replay buffer
-                # TODO: Perform PPO update steps
                 np_action = action.squeeze(0).detach().numpy()
                 # print("DEBUG: Taking action in PPO env:", np_action)
                 obs, reward, terminated, truncated, info = ppo_env.step(np_action)
