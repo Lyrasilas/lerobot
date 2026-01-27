@@ -280,7 +280,7 @@ class CarRacingEnvConfig(EnvConfig):
     episode_length: int = 1000
     render_mode: str = "rgb_array"
     continuous: bool = True
-    track_style: str = "circle_small"
+    track_style: str = "default"
     num_checkpoints: int = 12
     view: str = "car"
     features: dict[str, PolicyFeature] = field(

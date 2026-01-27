@@ -58,7 +58,7 @@ class TrainPipelineConfig(HubMixin):
     eval_freq: int = 200_000
     log_freq: int = 200
     # Frequency of DRL updates
-    DRL_freq: int = 2_000
+    DRL_freq: int = 20
     save_checkpoint: bool = True
     # Checkpoint is saved every `save_freq` training iterations and after the last training step.
     save_freq: int = 10_000

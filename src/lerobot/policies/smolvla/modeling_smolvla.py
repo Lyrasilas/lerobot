@@ -604,6 +604,7 @@ class SmolVLAPolicy(PreTrainedPolicy):
         device = batch["device"]
         batch = {k: v for k, v in batch.items() if k not in ignored_keys}
         _, _, mean, std, value = self.forward(batch)
+        print("DEBUG: mean std", mean, std)
         dists = torch.distributions.Normal(mean, std)
         
         raw_actions = batch["action"]

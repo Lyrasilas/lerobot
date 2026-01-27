@@ -877,7 +877,7 @@ def train(cfg: TrainPipelineConfig):
             if isinstance(batch[key], torch.Tensor):
                 batch[key] = batch[key].to(device, non_blocking=device.type == "cuda")
 
-        print_cuda_memory("before update_policy")
+        # print_cuda_memory("before update_policy")
         train_tracker, output_dict = update_policy(
             train_tracker,
             policy,
@@ -888,7 +888,7 @@ def train(cfg: TrainPipelineConfig):
             lr_scheduler=lr_scheduler,
             use_amp=cfg.policy.use_amp,
         )
-        print_cuda_memory("after update_policy")
+        # print_cuda_memory("after update_policy")
         # Note: eval and checkpoint happens *after* the `step`th training update has completed, so we
         # increment `step` here.
         step += 1
