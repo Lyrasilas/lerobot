@@ -705,6 +705,20 @@ class VLAFlowMatching(nn.Module):
         # self.actor_head_value_proj = nn.Linear(self.vlm_with_expert.expert_hidden_size, 1)
         # New MLP layers for PPO
         
+
+        # # Register forward hooks for debugging
+        # def hook_fn(module, input, output):
+        #     print(f"[HOOK] {module.__class__.__name__} was used in forward pass")
+        # self.actor_head_mean_proj.register_forward_hook(hook_fn)
+        # self.actor_head_logstd_proj.register_forward_hook(hook_fn)
+        # self.actor_head_value_proj.register_forward_hook(hook_fn)
+        
+        # nn.init.orthogonal_(self.actor_head_value_proj.weight, gain=1.0)
+        # nn.init.zeros_(self.actor_head_value_proj.bias)
+        # nn.init.normal_(self.actor_head_mean_proj.weight, mean=0.0, std=0.01)
+        # nn.init.zeros_(self.actor_head_mean_proj.bias)
+        # nn.init.normal_(self.actor_head_logstd_proj.weight, mean=0.0, std=0.01)
+        # nn.init.zeros_(self.actor_head_logstd_proj.bias)
         self.actor_head_mean_proj = nn.Sequential(
             nn.Linear(self.vlm_with_expert.expert_hidden_size, self.vlm_with_expert.expert_hidden_size),
             nn.ReLU(),
@@ -720,20 +734,6 @@ class VLAFlowMatching(nn.Module):
             nn.ReLU(),
             nn.Linear(self.vlm_with_expert.expert_hidden_size, 1),
         )
-
-        # # Register forward hooks for debugging
-        # def hook_fn(module, input, output):
-        #     print(f"[HOOK] {module.__class__.__name__} was used in forward pass")
-        # self.actor_head_mean_proj.register_forward_hook(hook_fn)
-        # self.actor_head_logstd_proj.register_forward_hook(hook_fn)
-        # self.actor_head_value_proj.register_forward_hook(hook_fn)
-        
-        # nn.init.orthogonal_(self.actor_head_value_proj.weight, gain=1.0)
-        # nn.init.zeros_(self.actor_head_value_proj.bias)
-        # nn.init.normal_(self.actor_head_mean_proj.weight, mean=0.0, std=0.01)
-        # nn.init.zeros_(self.actor_head_mean_proj.bias)
-        # nn.init.normal_(self.actor_head_logstd_proj.weight, mean=0.0, std=0.01)
-        # nn.init.zeros_(self.actor_head_logstd_proj.bias)
         # Mean head
         for m in self.actor_head_mean_proj:
             if isinstance(m, nn.Linear):

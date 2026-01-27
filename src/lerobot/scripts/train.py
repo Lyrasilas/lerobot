@@ -67,6 +67,12 @@ from lerobot.utils.wandb_utils import WandBLogger
 from lerobot.utils.buffer import RolloutBufferTorch
 
 
+def print_cuda_memory(tag=""):
+    if torch.cuda.is_available():
+        print(f"[{tag}] Allocated: {torch.cuda.memory_allocated() / 1e9:.2f} GB, "
+              f"Reserved: {torch.cuda.memory_reserved() / 1e9:.2f} GB")
+
+
 def update_policy(
     train_metrics: MetricsTracker,
     policy: PreTrainedPolicy,
@@ -348,7 +354,7 @@ def train(cfg: TrainPipelineConfig):
     train_tracker = MetricsTracker(
         cfg.batch_size, dataset.num_frames, dataset.num_episodes, train_metrics, initial_step=step
     )
-
+    print_cuda_memory("before main training loop")
     # logging.info("Starting PPO layer warmup")
 
     # for name, param in policy.named_parameters():
@@ -716,6 +722,7 @@ def train(cfg: TrainPipelineConfig):
                 # log_probs[..., 1:] -= sigmoid_jacobian
                 # sum to one log_prob
                 log_prob = log_probs.sum(-1)  # maybe change for larger batches
+                action = action.to("cpu")
                 np_action = action.squeeze(0).detach().numpy()
                 # print("DEBUG: Taking action in PPO env:", np_action)
                 obs, reward, terminated, truncated, info = ppo_env.step(np_action)
@@ -830,6 +837,7 @@ def train(cfg: TrainPipelineConfig):
                             mbatch["device"] = device
                             print("DEBUG: PPO minibatch from", start, "to", end)
                             # mbatch.to(device)
+                            print_cuda_memory("before PPO update_policy_ppo")
                             train_tracker, output_dict = update_policy_ppo(
                                 train_tracker,
                                 policy,
@@ -841,6 +849,7 @@ def train(cfg: TrainPipelineConfig):
                                 lr_scheduler=ppo_lr_scheduler,
                                 use_amp=cfg.policy.use_amp,
                             )
+                            print_cuda_memory("after PPO update_policy_ppo")
                         logging.info(train_tracker)
                         if wandb_logger:
                             wandb_log_dict = train_tracker.to_dict()
@@ -868,6 +877,7 @@ def train(cfg: TrainPipelineConfig):
             if isinstance(batch[key], torch.Tensor):
                 batch[key] = batch[key].to(device, non_blocking=device.type == "cuda")
 
+        print_cuda_memory("before update_policy")
         train_tracker, output_dict = update_policy(
             train_tracker,
             policy,
@@ -878,7 +888,7 @@ def train(cfg: TrainPipelineConfig):
             lr_scheduler=lr_scheduler,
             use_amp=cfg.policy.use_amp,
         )
-
+        print_cuda_memory("after update_policy")
         # Note: eval and checkpoint happens *after* the `step`th training update has completed, so we
         # increment `step` here.
         step += 1
