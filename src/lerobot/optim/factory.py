@@ -35,6 +35,11 @@ def make_optimizer_and_scheduler(
         tuple[Optimizer, LRScheduler | None]: The couple (Optimizer, Scheduler). Scheduler can be `None`.
     """
     params = policy.get_optim_params() if cfg.use_policy_training_preset else policy.parameters()
+    # param_ids = set(id(p) for p in params)
+    # print("Params in optimizer:")
+    # for name, p in policy.named_parameters():
+    #     if id(p) in param_ids:
+    #         print(name)
     optimizer = cfg.optimizer.build(params)
     lr_scheduler = cfg.scheduler.build(optimizer, cfg.steps) if cfg.scheduler is not None else None
     return optimizer, lr_scheduler

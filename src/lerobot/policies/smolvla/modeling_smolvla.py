@@ -607,24 +607,28 @@ class SmolVLAPolicy(PreTrainedPolicy):
         print("DEBUG: mean std", mean, std)
         dists = torch.distributions.Normal(mean, std)
         
-        raw_actions = batch["action"]
+        prev_actions = batch["action"]
         
-        action = torch.zeros(batch["action"].size())
-        action[..., 0] = torch.tanh(raw_actions[..., 0])
-        action[..., 1:] = torch.sigmoid(raw_actions[..., 1:])
+        actions = torch.zeros(batch["action"].size())
+        actions[..., 0] = 0.5 * torch.log(1 + prev_actions[...,0]) - 0.5 * torch.log(1 - prev_actions[...,0])
+        actions[..., 1:] = -torch.log(1 / prev_actions[..., 1:] - 1)
         # calculate log_probs
-        log_probs = dists.log_prob(raw_actions)
+        actions = actions.to(device=device)
+        log_probs = dists.log_prob(actions)
         
-        tanh_jacobian = torch.log(1 - action[..., 0]**2 + 1e-6)
-        sigmoid_jacobian = action[..., 1:].log() + (1- action[..., 1:]).log()
-        tanh_jacobian = tanh_jacobian.to(device)
-        sigmoid_jacobian = sigmoid_jacobian.to(device)
-        log_probs[..., 0] -= tanh_jacobian
-        log_probs[..., 1:] -= sigmoid_jacobian
-        # sum to one log_prob
-        log_probs = log_probs.sum(-1)  # maybe change for larger batches
+        logs = torch.zeros_like(prev_actions)
+                
+        logs[..., 0] = torch.log(1 - ((prev_actions[..., 0])**2) + 1e-6)
+        logs[..., 1:] = torch.log(prev_actions[..., 1:]) + torch.log(1 - prev_actions[..., 1:] + 1e-6)
+        
+                # sum to one log_prob
+        log_probs = (log_probs - logs).sum(-1)  # maybe change for larger batches
         
         entropy = dists.entropy().sum(-1)
+        
+        log_probs.detach()
+        entropy.detach()
+        value.detach()
         
         return log_probs, entropy, value.squeeze(-1)
 
@@ -707,12 +711,7 @@ class VLAFlowMatching(nn.Module):
         # New MLP layers for PPO
         
 
-        # # Register forward hooks for debugging
-        # def hook_fn(module, input, output):
-        #     print(f"[HOOK] {module.__class__.__name__} was used in forward pass")
-        # self.actor_head_mean_proj.register_forward_hook(hook_fn)
-        # self.actor_head_logstd_proj.register_forward_hook(hook_fn)
-        # self.actor_head_value_proj.register_forward_hook(hook_fn)
+        
         
         # nn.init.orthogonal_(self.actor_head_value_proj.weight, gain=1.0)
         # nn.init.zeros_(self.actor_head_value_proj.bias)
@@ -744,13 +743,19 @@ class VLAFlowMatching(nn.Module):
         for m in self.actor_head_logstd_proj:
             if isinstance(m, nn.Linear):
                 nn.init.orthogonal_(m.weight, gain=0.01)
-                nn.init.zeros_(m.bias)
+                nn.init.constant_(m.bias, -1.0)
         # Value head
         for m in self.actor_head_value_proj:
             if isinstance(m, nn.Linear):
                 nn.init.orthogonal_(m.weight, gain=1.0)
                 nn.init.zeros_(m.bias)
         
+        # # Register forward hooks for debugging
+        # def hook_fn(module, input, output):
+        #     print(f"[HOOK] {module.__class__.__name__} was used in forward pass")
+        # self.actor_head_mean_proj.register_forward_hook(hook_fn)
+        # self.actor_head_logstd_proj.register_forward_hook(hook_fn)
+        # self.actor_head_value_proj.register_forward_hook(hook_fn)
 
         self.action_time_mlp_in = nn.Linear(
             self.vlm_with_expert.expert_hidden_size * 2, self.vlm_with_expert.expert_hidden_size
