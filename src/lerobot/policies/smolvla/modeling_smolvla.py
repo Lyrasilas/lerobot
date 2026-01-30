@@ -608,18 +608,19 @@ class SmolVLAPolicy(PreTrainedPolicy):
         dists = torch.distributions.Normal(mean, std)
         
         prev_actions = batch["action"]
-        
+        clamp_prev0 = prev_actions[..., 0].clamp(-1 + 1e-6, 1 - 1e-6)
+        clamp_prev1 = prev_actions[..., 1:].clamp(1e-6, 1 - 1e-6)
         actions = torch.zeros(batch["action"].size())
-        actions[..., 0] = 0.5 * torch.log(1 + prev_actions[...,0]) - 0.5 * torch.log(1 - prev_actions[...,0])
-        actions[..., 1:] = -torch.log(1 / prev_actions[..., 1:] - 1)
+        actions[..., 0] = 0.5 * torch.log1p(clamp_prev0) - 0.5 * torch.log1p(-clamp_prev0)
+        actions[..., 1:] = -(torch.log(1 - clamp_prev1) - torch.log(clamp_prev1))
         # calculate log_probs
         actions = actions.to(device=device)
         log_probs = dists.log_prob(actions)
         
         logs = torch.zeros_like(prev_actions)
-                
-        logs[..., 0] = torch.log(1 - ((prev_actions[..., 0])**2) + 1e-6)
-        logs[..., 1:] = torch.log(prev_actions[..., 1:]) + torch.log(1 - prev_actions[..., 1:] + 1e-6)
+        const = math.log(2.0)
+        logs[...,0] = (2.0 * (const - actions[...,0] - F.softplus(-2.0 * actions[...,0])))
+        logs[...,1:] = -F.softplus(actions[...,1:]) - F.softplus(-actions[...,1:])
         
                 # sum to one log_prob
         log_probs = (log_probs - logs).sum(-1)  # maybe change for larger batches

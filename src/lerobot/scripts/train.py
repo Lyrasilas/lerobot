@@ -15,6 +15,7 @@
 # limitations under the License.
 
 import logging
+import math
 import time
 from contextlib import nullcontext
 from pprint import pformat
@@ -216,7 +217,8 @@ def ppo_clip_loss(policy, batch, clip_epsilon=0.2, value_coef=0.5, entropy_coef=
     )
     device = batch["device"]
     # Calculate probability ratio
-    ratios = torch.exp(new_log_probs - batch["log_probs"]).to(device)
+    log_ratios = (new_log_probs - batch["log_probs"]).clamp(min=-20,max=20).to(device)
+    ratios = torch.exp(log_ratios).to(device)
     # Clipped surrogate objective
     surr1 = ratios * batch["advantages"].to(device)
     surr2 = torch.clamp(ratios, 1.0 - clip_epsilon, 1.0 + clip_epsilon) * batch["advantages"].to(device)
@@ -478,12 +480,15 @@ def train(cfg: TrainPipelineConfig):
                 action_clamped = torch.clamp(action, action_low, action_high)
                 logs = torch.zeros_like(raw_action)
                 
-                logs[..., 0] = torch.log(1 - ((action_clamped[..., 0])**2) + 1e-6)
-                logs[..., 1:] = torch.log(action_clamped[..., 1:]) + torch.log(1 - action_clamped[..., 1:] + 1e-6)
+                # logs[..., 0] = torch.log(1 - ((action_clamped[..., 0])**2) + 1e-6)
+                # logs[..., 1:] = torch.log(action_clamped[..., 1:]) + torch.log(1 - action_clamped[..., 1:] + 1e-6)
+                const = math.log(2.0)
+                logs[...,0] = (2.0 * (const - raw_action[...,0] - F.softplus(-2.0 * raw_action[...,0])))
+                logs[...,1:] = -F.softplus(raw_action[...,1:]) - F.softplus(-raw_action[...,1:])
                 
                 old_logs = (base_log_probs - logs).sum(-1)
 
-                action = action.to("cpu")
+                action = action_clamped.to("cpu")
                 np_action = action.squeeze(0).detach().numpy()
                 # print("DEBUG: Taking action in PPO env:", np_action)
                 obs, reward, terminated, truncated, info = ppo_env.step(np_action)
@@ -498,7 +503,7 @@ def train(cfg: TrainPipelineConfig):
 
                 batch = {
                     "observation.images.front": torch.tensor(norm_obs).to(device).permute(0,3,1,2),
-                    "action": action.detach().to(device),
+                    "action": action_clamped.detach().to(device),
                     "observation.state": prev_action.detach().to(device),  # just a placeholder
                     "timestamp": torch.tensor(timestamp).unsqueeze(0).unsqueeze(0).to(device),
                     "frame_index": torch.tensor(ppo_step).unsqueeze(0).unsqueeze(0).to(device),
@@ -519,7 +524,7 @@ def train(cfg: TrainPipelineConfig):
                 # TODO: Put the scalars into tensors in the transition
                 transition = {
                                 "obs": prev_obs.permute(0,2,3,1).squeeze(0).detach().cpu(),
-                                "action": action.squeeze(0).squeeze(0).detach().cpu(),
+                                "action": action_clamped.squeeze(0).squeeze(0).detach().cpu(),
                                 "reward": torch.as_tensor(reward),
                                 "done": torch.as_tensor(terminated),
                                 "log_prob": old_logs.detach().cpu(),
