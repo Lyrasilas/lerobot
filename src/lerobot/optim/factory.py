@@ -40,6 +40,6 @@ def make_optimizer_and_scheduler(
     # for name, p in policy.named_parameters():
     #     if id(p) in param_ids:
     #         print(name)
-    optimizer = cfg.optimizer.build(params)
+    optimizer = cfg.optimizer.build(params) if cfg.optimizer is not None else None
     lr_scheduler = cfg.scheduler.build(optimizer, cfg.steps) if cfg.scheduler is not None else None
     return optimizer, lr_scheduler

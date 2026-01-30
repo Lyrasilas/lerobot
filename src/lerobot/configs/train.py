@@ -53,16 +53,17 @@ class TrainPipelineConfig(HubMixin):
     num_workers: int = 4
     batch_size: int = 8
     steps: int = 100_000
-    replay_capacity: int = 8_192
     # replay_capacity: int = 32
     # replay_capacity: int = 2048
+    replay_capacity: int = 8_192
     eval_freq: int = 200_000
     log_freq: int = 200
     # Frequency of DRL updates
     DRL_freq: int = 2000
     save_checkpoint: bool = True
     # Checkpoint is saved every `save_freq` training iterations and after the last training step.
-    save_freq: int = 10_000
+    # save_freq: int = 10_000
+    save_freq: int = 100
     use_policy_training_preset: bool = True
     optimizer: OptimizerConfig | None = None
     scheduler: LRSchedulerConfig | None = None
@@ -75,6 +76,7 @@ class TrainPipelineConfig(HubMixin):
     def validate(self):
         # HACK: We parse again the cli args here to get the pretrained paths if there was some.
         policy_path = parser.get_path_arg("policy")
+        print(f"[DEBUG] policy_path from CLI: {policy_path}")
         if policy_path:
             # Only load the policy config
             cli_overrides = parser.get_cli_overrides("policy")
@@ -83,6 +85,7 @@ class TrainPipelineConfig(HubMixin):
         elif self.resume:
             # The entire train config is already loaded, we just need to get the checkpoint dir
             config_path = parser.parse_arg("config_path")
+            print(f"[DEBUG] config_path from CLI: {config_path}")
             if not config_path:
                 raise ValueError(
                     f"A config_path is expected when resuming a run. Please specify path to {TRAIN_CONFIG_NAME}"
@@ -95,7 +98,7 @@ class TrainPipelineConfig(HubMixin):
             policy_path = Path(config_path).parent
             self.policy.pretrained_path = policy_path
             self.checkpoint_path = policy_path.parent
-
+            print(f"Resuming training from checkpoint path: {self.checkpoint_path}")
         if not self.job_name:
             if self.env is None:
                 self.job_name = f"{self.policy.type}"

@@ -234,7 +234,9 @@ def ppo_clip_loss(policy, batch, clip_epsilon=0.2, value_coef=0.5, entropy_coef=
 
 @parser.wrap()
 def train(cfg: TrainPipelineConfig):
+    print("[DEBUG] Training configuration:")
     cfg.validate()
+    print("[DEBUG] Training configuration after validation:")
     logging.info(pformat(cfg.to_dict()))
 
     if cfg.wandb.enable and cfg.wandb.project:
@@ -281,13 +283,11 @@ def train(cfg: TrainPipelineConfig):
     )
     print("[DEBUG] Policy created")
 
-    print("[DEBUG] Creating optimizer and scheduler")
     logging.info("Creating optimizer and scheduler")
+    
     optimizer, lr_scheduler = make_optimizer_and_scheduler(cfg, policy)
     grad_scaler = GradScaler(device.type, enabled=cfg.policy.use_amp)
-    print("[DEBUG] Optimizer, scheduler, grad_scaler created")
 
-    print("[DEBUG] Entering training loop setup")
     step = 0  # number of policy updates (forward + backward + optim)
 
     if cfg.resume:
