@@ -45,7 +45,7 @@ class Racecar(Robot):
         }
         self.cameras = make_cameras_from_configs(config.cameras)
         print("[DEBUG] Racecar motors and cameras initialized.")
-        self.env = gymnasium.make("CarRacing-v3", render_mode="human", continuous=True, track_style="default", view="car")
+        self.env = gymnasium.make("CarRacing-v3", render_mode="rgb_array", continuous=True, track_style="default", view="car")
         print("[DEBUG] Racecar environment created successfully.")
         self._env_obs, _ = self.env.reset()
         
