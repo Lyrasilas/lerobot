@@ -130,7 +130,7 @@ class DatasetRecordConfig:
     # Limit the frames per second.
     fps: int = 30
     # Number of seconds for data recording for each episode.
-    episode_time_s: int | float = 60
+    episode_time_s: int | float = 300
     # Number of seconds for resetting the environment after each episode.
     reset_time_s: int | float = 5
     # Number of episodes to record.
@@ -281,8 +281,12 @@ def record_loop(
         # Action can eventually be clipped using `max_relative_target`,
         # so action actually sent is saved in the dataset.
         # print("[DEBUG] Action generated:", action)
-        sent_action = robot.send_action(action)
+        sent_action, done = robot.send_action(action)
 
+        if done:
+            print("[DEBUG] Environment signaled done. Resetting environment...")
+            events["exit_early"] = True
+        
         if dataset is not None:
             action_frame = build_dataset_frame(dataset.features, sent_action, prefix="action")
             frame = {**observation_frame, **action_frame}
