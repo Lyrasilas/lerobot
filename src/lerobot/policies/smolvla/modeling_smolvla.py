@@ -704,22 +704,8 @@ class VLAFlowMatching(nn.Module):
         self.action_in_proj = nn.Linear(self.config.max_action_dim, self.vlm_with_expert.expert_hidden_size)
         self.action_out_proj = nn.Linear(self.vlm_with_expert.expert_hidden_size, self.config.max_action_dim)
         
-        # New linear layers for action distribution prediction used in PPO
+        # Newly added actor heads for mean and logstd and value head for the critic.
         
-        # self.actor_head_mean_proj = nn.Linear(self.vlm_with_expert.expert_hidden_size, self.config.max_action_dim)
-        # self.actor_head_logstd_proj = nn.Linear(self.vlm_with_expert.expert_hidden_size, self.config.max_action_dim)
-        # self.actor_head_value_proj = nn.Linear(self.vlm_with_expert.expert_hidden_size, 1)
-        # New MLP layers for PPO
-        
-
-        
-        
-        # nn.init.orthogonal_(self.actor_head_value_proj.weight, gain=1.0)
-        # nn.init.zeros_(self.actor_head_value_proj.bias)
-        # nn.init.normal_(self.actor_head_mean_proj.weight, mean=0.0, std=0.01)
-        # nn.init.zeros_(self.actor_head_mean_proj.bias)
-        # nn.init.normal_(self.actor_head_logstd_proj.weight, mean=0.0, std=0.01)
-        # nn.init.zeros_(self.actor_head_logstd_proj.bias)
         self.actor_head_mean_proj = nn.Sequential(
             nn.Linear(self.vlm_with_expert.expert_hidden_size, self.vlm_with_expert.expert_hidden_size),
             nn.ReLU(),
