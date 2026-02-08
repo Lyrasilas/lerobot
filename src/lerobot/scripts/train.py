@@ -480,8 +480,6 @@ def train(cfg: TrainPipelineConfig):
                 action_clamped = torch.clamp(action, action_low, action_high)
                 logs = torch.zeros_like(raw_action)
                 
-                # logs[..., 0] = torch.log(1 - ((action_clamped[..., 0])**2) + 1e-6)
-                # logs[..., 1:] = torch.log(action_clamped[..., 1:]) + torch.log(1 - action_clamped[..., 1:] + 1e-6)
                 const = math.log(2.0)
                 logs[...,0] = (2.0 * (const - raw_action[...,0] - F.softplus(-2.0 * raw_action[...,0])))
                 logs[...,1:] = -F.softplus(raw_action[...,1:]) - F.softplus(-raw_action[...,1:])
