@@ -588,7 +588,7 @@ def train(cfg: TrainPipelineConfig):
                             mbatch["device"] = device
                             print("DEBUG: PPO minibatch from", start, "to", end)
                             # mbatch.to(device)
-                            print_cuda_memory("before PPO update_policy_ppo")
+                            # print_cuda_memory("before PPO update_policy_ppo")
                             train_tracker, output_dict = update_policy_ppo(
                                 train_tracker,
                                 policy,
@@ -600,7 +600,7 @@ def train(cfg: TrainPipelineConfig):
                                 lr_scheduler=ppo_lr_scheduler,
                                 use_amp=cfg.policy.use_amp,
                             )
-                            print_cuda_memory("after PPO update_policy_ppo")
+                            # print_cuda_memory("after PPO update_policy_ppo")
                         logging.info(train_tracker)
                         if wandb_logger:
                             wandb_log_dict = train_tracker.to_dict()
