@@ -45,7 +45,7 @@ class Racecar(Robot):
         }
         self.cameras = make_cameras_from_configs(config.cameras)
         print("[DEBUG] Racecar motors and cameras initialized.")
-        self.env = gymnasium.make("CarRacing-v3", render_mode="human", continuous=True, track_style="default", view="car")
+        self.env = gymnasium.make("CarRacing-v3", render_mode="rgb_array", continuous=True, track_style="circle_small", view="car")
         print("[DEBUG] Racecar environment created successfully.")
         self._env_obs, _ = self.env.reset()
         
@@ -155,12 +155,12 @@ class Racecar(Robot):
         # time.sleep(0.1)
         action_values = np.array([val for key, val in action.items() if key.endswith(".pos")], dtype=np.float32)
         # print("[DEBUG] Sending action to Racecar environment:", action_values)
-        self._env_obs, _, terminated, truncated, _ = self.env.step(action_values)
+        self._env_obs, _, terminated, truncated, info = self.env.step(action_values)
         done = terminated or truncated
         # logger.info("Actions sent to Racecar motors.")
 
         # Return the actual action sent
-        return {f"{motor}.pos": val for motor, val in goal_pos.items()}, done
+        return {f"{motor}.pos": val for motor, val in goal_pos.items()}, done, info
     
     def disconnect(self):
         pass  # Optionally add any simulated disconnect logic here
@@ -168,3 +168,8 @@ class Racecar(Robot):
     def connect(self, calibrate: bool = True) -> None:
         """Simulated connect method for Racecar."""
         pass
+    
+    def reset(self):
+        """Reset the racecar environment."""
+        self._env_obs, _ = self.env.reset()
+        logger.info("Racecar environment reset.")

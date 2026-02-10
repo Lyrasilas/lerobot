@@ -205,8 +205,6 @@ def record_loop(
     single_task: str | None = None,
     display_data: bool = False,
 ):
-    import lerobot.robots.racecar.racecar
-    print(lerobot.robots.racecar.racecar.__file__)
     if dataset is not None and dataset.fps != fps:
         raise ValueError(f"The dataset fps should be equal to requested fps ({dataset.fps} != {fps}).")
 
@@ -267,7 +265,8 @@ def record_loop(
 
             action = {**arm_action, **base_action} if len(base_action) > 0 else arm_action
         else:
-            robot.env.reset()
+            print("DEBUG: First reset point reached. Resetting environment...")
+            robot.reset()
             if not log_reset_warning:
                 logging.info(
                     "No policy or teleoperator provided, skipping action generation."
@@ -281,11 +280,13 @@ def record_loop(
         # Action can eventually be clipped using `max_relative_target`,
         # so action actually sent is saved in the dataset.
         # print("[DEBUG] Action generated:", action)
-        sent_action, done = robot.send_action(action)
+        sent_action, done, info = robot.send_action(action)
 
         if done:
             print("[DEBUG] Environment signaled done. Resetting environment...")
+            robot.reset()
             events["exit_early"] = True
+            print(f"Completion percentage:", format(info["completion_percent"], '.1f'), "%")
         
         if dataset is not None:
             action_frame = build_dataset_frame(dataset.features, sent_action, prefix="action")
@@ -313,7 +314,6 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
     action_features = hw_to_dataset_features(robot.action_features, "action", cfg.dataset.video)
     obs_features = hw_to_dataset_features(robot.observation_features, "observation", cfg.dataset.video)
     dataset_features = {**action_features, **obs_features}
-
     if cfg.resume:
         dataset = LeRobotDataset(
             cfg.dataset.repo_id,
@@ -373,7 +373,6 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
                 (recorded_episodes < cfg.dataset.num_episodes - 1) or events["rerecord_episode"]
             ):
                 log_say("Reset the environment", cfg.play_sounds)
-                print("[DEBUG] Resetting the environment...")
                 record_loop(
                     robot=robot,
                     events=events,
