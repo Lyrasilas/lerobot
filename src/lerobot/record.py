@@ -286,7 +286,8 @@ def record_loop(
             print("[DEBUG] Environment signaled done. Resetting environment...")
             robot.reset()
             events["exit_early"] = True
-            print(f"Completion percentage:", format(info["completion_percent"], '.1f'), "%")
+            with open("completion_percent.txt", "a") as f:
+                f.write(f"Completion percentage: {format(info['completion_percent'], '.1f')} %\n")
         
         if dataset is not None:
             action_frame = build_dataset_frame(dataset.features, sent_action, prefix="action")
@@ -353,6 +354,8 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
 
     with VideoEncodingManager(dataset):
         recorded_episodes = 0
+        with open("completion_percent.txt", "a") as f:
+                f.write(f"{dataset.repo_id} - Starting recording of {cfg.dataset.num_episodes} episodes\n")
         while recorded_episodes < cfg.dataset.num_episodes and not events["stop_recording"]:
             log_say(f"Recording episode {dataset.num_episodes}", cfg.play_sounds)
             record_loop(
