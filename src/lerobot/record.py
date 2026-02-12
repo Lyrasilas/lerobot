@@ -130,7 +130,7 @@ class DatasetRecordConfig:
     # Limit the frames per second.
     fps: int = 30
     # Number of seconds for data recording for each episode.
-    episode_time_s: int | float = 300
+    episode_time_s: int | float = 120
     # Number of seconds for resetting the environment after each episode.
     reset_time_s: int | float = 5
     # Number of episodes to record.
@@ -233,6 +233,7 @@ def record_loop(
     start_episode_t = time.perf_counter()
     # robot.env.reset()  # or robot.reset() if you have such a method
     log_reset_warning = False
+    info = {}
     while timestamp < control_time_s:
         start_loop_t = time.perf_counter()
         if events["exit_early"]:
@@ -299,8 +300,9 @@ def record_loop(
         dt_s = time.perf_counter() - start_loop_t
         busy_wait(1 / fps - dt_s)
         timestamp = time.perf_counter() - start_episode_t
-    # with open("completion_percent.txt", "a") as f:
-    #             f.write(f"Completion percentage: {format(info['completion_percent'], '.1f')} %\n")
+    if len(info) != 0: 
+        with open("completion_percent.txt", "a") as f:
+            f.write(f"Completion percentage: {format(info['completion_percent'], '.1f')} %\n")
 
 
 @parser.wrap()
@@ -370,7 +372,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
                 single_task=cfg.dataset.single_task,
                 display_data=cfg.display_data,
             )
-
+            print("DEBUG:-------------------------------------------------------------------------")
             # Execute a few seconds without recording to give time to manually reset the environment
             # Skip reset for the last episode to be recorded
             if not events["stop_recording"] and (
