@@ -451,16 +451,10 @@ class SmolVLAPolicy(PreTrainedPolicy):
             self._queues[ACTION].extend(actions.transpose(0, 1)[: self.config.n_action_steps])
         if len(self._queues[ACTION]) < 40:
             actions = self._get_action_chunk(batch, noise)
-            print(self._queues[ACTION][0])
-            print(actions[0][0])
-            diff = np.linalg.norm(self._queues[ACTION] - actions[0][0])
-            if diff > 1e-3:
-                self._queues = {
+            self._queues = {
                 ACTION: deque(maxlen=self.config.n_action_steps),
             }
-                self._queues[ACTION].extend(actions.transpose(0, 1)[: self.config.n_action_steps])
-        # print("[DEBUG] Action queue length:", len(self._queues[ACTION]))
-        print(len(self._queues[ACTION]))
+            self._queues[ACTION].extend(actions.transpose(0, 1)[: self.config.n_action_steps])
         return self._queues[ACTION].popleft()
 
     def forward(self, batch: dict[str, Tensor], noise=None, time=None) -> dict[str, Tensor]:

@@ -45,9 +45,9 @@ class Racecar(Robot):
         }
         self.cameras = make_cameras_from_configs(config.cameras)
         print("[DEBUG] Racecar motors and cameras initialized.")
-        self.env = gymnasium.make("CarRacing-v3", render_mode="human", continuous=True, track_style="default", view="car")
+        self.env = gymnasium.make("CarRacing-v3", render_mode="human", continuous=True, track_style="circle_small", view="car")
         print("[DEBUG] Racecar environment created successfully.")
-        self._env_obs, _ = self.env.reset()
+        self._env_obs, _ = self.env.reset(seed=1)
         
     @property
     def _motors_ft(self) -> dict[str, type]:
@@ -171,5 +171,5 @@ class Racecar(Robot):
     
     def reset(self):
         """Reset the racecar environment."""
-        self._env_obs, _ = self.env.reset()
+        self._env_obs, _ = self.env.reset(seed=1)
         logger.info("Racecar environment reset.")

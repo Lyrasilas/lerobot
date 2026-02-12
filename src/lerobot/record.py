@@ -235,7 +235,6 @@ def record_loop(
     log_reset_warning = False
     while timestamp < control_time_s:
         start_loop_t = time.perf_counter()
-
         if events["exit_early"]:
             events["exit_early"] = False
             break
@@ -300,6 +299,8 @@ def record_loop(
         dt_s = time.perf_counter() - start_loop_t
         busy_wait(1 / fps - dt_s)
         timestamp = time.perf_counter() - start_episode_t
+    # with open("completion_percent.txt", "a") as f:
+    #             f.write(f"Completion percentage: {format(info['completion_percent'], '.1f')} %\n")
 
 
 @parser.wrap()

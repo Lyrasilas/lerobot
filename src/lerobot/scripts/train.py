@@ -558,7 +558,7 @@ def train(cfg: TrainPipelineConfig):
                     # print("DEBUG: rewards mean", returns.mean())
                     # print("DEBUG: rewards std", returns.std())
                     # PPO update loop
-                    ppo_batch_size = 32
+                    ppo_batch_size = 50
                     ppo_epochs = get_scaled_ppo_epochs(step, cfg.steps)
                     # ppo_epochs = 2
                     for epoch in range(ppo_epochs):
@@ -586,7 +586,7 @@ def train(cfg: TrainPipelineConfig):
                             mbatch["advantages"] = advantages[start:end]
                             mbatch["returns"] = returns[start:end]
                             mbatch["device"] = device
-                            print("DEBUG: PPO minibatch from", start, "to", end)
+                            # print("DEBUG: PPO minibatch from", start, "to", end)
                             # mbatch.to(device)
                             # print_cuda_memory("before PPO update_policy_ppo")
                             train_tracker, output_dict = update_policy_ppo(
