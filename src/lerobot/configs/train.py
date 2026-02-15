@@ -53,17 +53,17 @@ class TrainPipelineConfig(HubMixin):
     num_workers: int = 4
     batch_size: int = 8
     steps: int = 100_000
-    # replay_capacity: int = 32
-    # replay_capacity: int = 2048
-    replay_capacity: int = 8_000
     eval_freq: int = 200_000
     log_freq: int = 200
     # Frequency of DRL updates
-    DRL_freq: int = 200000
+    DRL_freq: int = 2000
+    # Whether to perform PPO during training.
+    ppo: bool = False
+    # Size of the replay buffer for DRL steps. Only used if `DRL_freq` is greater than 0.
+    replay_capacity: int = 8_000
     save_checkpoint: bool = True
     # Checkpoint is saved every `save_freq` training iterations and after the last training step.
     save_freq: int = 10_000
-    # save_freq: int = 100
     use_policy_training_preset: bool = True
     optimizer: OptimizerConfig | None = None
     scheduler: LRSchedulerConfig | None = None
