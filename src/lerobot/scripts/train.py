@@ -360,38 +360,27 @@ def train(cfg: TrainPipelineConfig):
 
     for _ in range(step, cfg.steps):
 
-        is_DRL_step = cfg.DRL_freq > 0 and step > 0 and  step % cfg.DRL_freq == 0
-        # is_DRL_step = cfg.DRL_freq > 0 and step % cfg.DRL_freq == 0
-        # print(step, is_DRL_step)
+        is_DRL_step = cfg.DRL_freq > 0 and step > 0 and step % cfg.DRL_freq == 0 and cfg.ppo is True
         if is_DRL_step and step > 0:
             for name, param in policy.named_parameters():
                 if "actor_head" in name:
                     param.requires_grad = True
-                    # print("DEBUG: Enabling gradient for", name)
 
             head_params = []
             for name, param in policy.named_parameters():
                 if "actor_head" in name:
                     head_params.append(param)
-            # print("DEBUG: Creating head optimizer for DRL step", head_params)
             head_optimizer = cfg.optimizer.build(head_params)
             ppo_lr_scheduler = cfg.scheduler.build(head_optimizer, cfg.steps)
-            # head_optimizer = torch.optim.AdamW(head_params, lr=3e-4, weight_decay=1e-2)
-            # # print_live_cuda_tensors()
-            # prev_tensors = get_cuda_tensor_ids()
-            # print_new_cuda_tensors(prev_tensors)
-            # print("------------------------------------------------DEBUG: IN DRL STEP ------------------------------------------------")
             logging.info("Performing DRL step. Full PPO episode.")
             ppo_env = make_env(cfg.env)
             obs, info = ppo_env.reset()
-            # obs = obs[:168, ...]
 
             ppo_env.render()
             ppo_step = 0
             timestamp = ppo_step / cfg.env.fps
             done = False
             norm_obs = obs/255.0
-            # print("DEBUG:", norm_obs)
             batch = {
                     "observation.images.front": torch.tensor(norm_obs).to(device).permute(0,3,1,2),
                     "action": torch.zeros((1, ppo_env.action_space.shape[1])).unsqueeze(0).to(device),
@@ -414,12 +403,9 @@ def train(cfg: TrainPipelineConfig):
                 if batch[k].isnan().any():
                     print("DEBUG: NaN in batch key", k)
 
-            # while not done:
             while rollout_buffer.ptr < rollout_buffer.buffer_size:
                 if done:
-                    # print("DEBUG: PPO episode done", done)
                     obs, info = ppo_env.reset()
-                    # obs = obs[:168, ...]
                     ppo_env.render()
                     ppo_step = 0
                     timestamp = ppo_step / cfg.env.fps
@@ -440,41 +426,19 @@ def train(cfg: TrainPipelineConfig):
                     "observation.images.front_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
                     "task": ["Drive on the road."],
                 }
-                # # report_gpu_memory(rollout_buffer)
-                # print_new_cuda_tensors(prev_tensors)
-                # prev_tensors = get_cuda_tensor_ids()
-                # # print_live_cuda_tensors()
-                # print("------------------------------------------------DEBUG: PPO step------------------------------------------------")
-                # print("DEBUG: PPO step start", ppo_step)
-                # get action distributions for further calcs
+
                 with torch.no_grad():
                     dists, value = policy.get_action_distributions(batch)
                 # sample action
                 raw_action = dists.rsample()
                 action = raw_action.clone()
-                # map action to environment friendly range using clipping
-                # Old version (tanh/sigmoid):
-                # action = torch.zeros(batch["action"].size())
+
                 action[..., 0] = torch.tanh(raw_action[..., 0])
                 action[..., 1:] = torch.sigmoid(raw_action[..., 1:])
-                # # New version (clipping):
-                # action_low = torch.tensor([-1.0, 0.0, 0.0], device=raw_action.device)
-                # action_high = torch.tensor([1.0, 1.0, 1.0], device=raw_action.device)
-                # action = torch.clamp(raw_action, action_low, action_high)
-                # print("DEBUG: raw_action", raw_action , "\naction", action)
-                # print("DEBUG: action for old_log_prob calc", action)
+
                 # calculate log_probs
                 base_log_probs = dists.log_prob(raw_action)
-                # if (raw_action >= 100).any() or (raw_action <= -100).any():
-                #     print("DEBUG: raw_action", raw_action)
-                #     print("DEBUG: action", value)
-                # if log_probs.isnan().any():
-                #     print("DEBUG: NaN in log_probs")
-                #     print("DEBUG: log_probs", log_probs)
-                #     print("DEBUG: raw_action", raw_action)
-                #     print("DEBUG: dist", dists, value, action)
-                #     exit(1)
-                # # mappings for log_probs and their use
+
                 action_low = torch.tensor([-1.0, 0.0, 0.0], device=raw_action.device)
                 action_high = torch.tensor([1.0, 1.0, 1.0], device=raw_action.device)
                 action_clamped = torch.clamp(action, action_low, action_high)
@@ -488,11 +452,8 @@ def train(cfg: TrainPipelineConfig):
 
                 action = action_clamped.to("cpu")
                 np_action = action.squeeze(0).detach().numpy()
-                # print("DEBUG: Taking action in PPO env:", np_action)
                 obs, reward, terminated, truncated, info = ppo_env.step(np_action)
-                # obs = obs[:168, ...]
                 ppo_env.render()
-                # action = action.unsqueeze(0)
                 prev_action = batch["action"].unsqueeze(0)
                 prev_obs = batch["observation.images.front"]
                 ppo_step += 1
@@ -538,7 +499,7 @@ def train(cfg: TrainPipelineConfig):
                                 "task": "Drive on the road.",
                              }
                 rollout_buffer.add(**transition)
-                # print("DEBUG: Transition added to rollout buffer. Current ptr:", rollout_buffer.ptr)
+
             if rollout_buffer.ptr >= rollout_buffer.buffer_size:
                     print("DEBUG: Performing PPO update from rollout buffer")
                     # compute GAE advantages
@@ -546,17 +507,15 @@ def train(cfg: TrainPipelineConfig):
                         next_value = policy.get_value(batch).squeeze(0)
                     rewards = rollout_buffer.rewards
                     values = rollout_buffer.values
-                    # print("DEBUG:", values)
+
                     dones = rollout_buffer.dones
                     advantages = compute_gae(rewards, values, dones, next_value)
-                    # print("DEBUG: advantages mean", advantages.mean())
-                    # print("DEBUG: advantages std", advantages.std())
+
                     returns = advantages + values
                     # Normalize advantages
                     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-                    # print("DEBUG: rewards mean", returns.mean())
-                    # print("DEBUG: rewards std", returns.std())
+
                     # PPO update loop
                     ppo_batch_size = 50
                     ppo_epochs = get_scaled_ppo_epochs(step, cfg.steps)
@@ -586,21 +545,17 @@ def train(cfg: TrainPipelineConfig):
                             mbatch["advantages"] = advantages[start:end]
                             mbatch["returns"] = returns[start:end]
                             mbatch["device"] = device
-                            # print("DEBUG: PPO minibatch from", start, "to", end)
-                            # mbatch.to(device)
-                            # print_cuda_memory("before PPO update_policy_ppo")
+                            
                             train_tracker, output_dict = update_policy_ppo(
                                 train_tracker,
                                 policy,
                                 mbatch,
                                 head_optimizer,
                                 0.1,
-                                # cfg.optimizer.grad_clip_norm,
                                 grad_scaler=grad_scaler,
                                 lr_scheduler=ppo_lr_scheduler,
                                 use_amp=cfg.policy.use_amp,
                             )
-                            # print_cuda_memory("after PPO update_policy_ppo")
                         logging.info(train_tracker)
                         if wandb_logger:
                             wandb_log_dict = train_tracker.to_dict()
@@ -610,7 +565,7 @@ def train(cfg: TrainPipelineConfig):
                         train_tracker.reset_averages()
                     rollout_buffer.reset()
 
-                # policy.forward(batch)  # to potentially update internal buffers
+
             done = terminated or truncated
             print("DEBUG: PPO episode done", done)
             step += 1
@@ -628,7 +583,6 @@ def train(cfg: TrainPipelineConfig):
             if isinstance(batch[key], torch.Tensor):
                 batch[key] = batch[key].to(device, non_blocking=device.type == "cuda")
 
-        # print_cuda_memory("before update_policy")
         train_tracker, output_dict = update_policy(
             train_tracker,
             policy,
@@ -639,7 +593,6 @@ def train(cfg: TrainPipelineConfig):
             lr_scheduler=lr_scheduler,
             use_amp=cfg.policy.use_amp,
         )
-        # print_cuda_memory("after update_policy")
         # Note: eval and checkpoint happens *after* the `step`th training update has completed, so we
         # increment `step` here.
         step += 1
@@ -725,7 +678,6 @@ def compute_gae(rewards, values, dones, next_value, gamma=0.99, lam=0.95):
     advantages = torch.zeros(T)
     gae = 0
     for t in reversed(range(T)):
-        # delta = r_t + gamma * V_{t+1} * (1 - done_t) - V_t
         if t == T - 1:
             next_v = next_value
         else:
