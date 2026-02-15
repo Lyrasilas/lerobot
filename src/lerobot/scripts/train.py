@@ -556,6 +556,7 @@ def train(cfg: TrainPipelineConfig):
                                 lr_scheduler=ppo_lr_scheduler,
                                 use_amp=cfg.policy.use_amp,
                             )
+                            train_tracker.step()
                         logging.info(train_tracker)
                         if wandb_logger:
                             wandb_log_dict = train_tracker.to_dict()
