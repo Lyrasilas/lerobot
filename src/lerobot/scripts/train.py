@@ -198,6 +198,7 @@ def update_policy_ppo(
     train_metrics.grad_norm = grad_norm.item()
     train_metrics.lr = optimizer.param_groups[0]["lr"]
     train_metrics.update_s = time.perf_counter() - start_time
+    train_metrics.ppo_loss = loss_dict["ppo_loss"]
     return train_metrics, loss_dict
 
 
@@ -229,7 +230,7 @@ def ppo_clip_loss(policy, batch, clip_epsilon=0.2, value_coef=0.5, entropy_coef=
     # Total loss
     loss = policy_loss + value_loss + entropy_loss
     # print("DEBUG: PPO LOSS", loss)
-    return {"ppo_loss":loss.item() ,"policy_loss": policy_loss.item(), "value_loss": value_loss.item(), "entropy_loss": entropy_loss.item()}
+    return loss, {"ppo_loss":loss.item() ,"policy_loss": policy_loss.item(), "value_loss": value_loss.item(), "entropy_loss": entropy_loss.item()}
 
 @parser.wrap()
 def train(cfg: TrainPipelineConfig):
@@ -344,6 +345,7 @@ def train(cfg: TrainPipelineConfig):
         "lr": AverageMeter("lr", ":0.1e"),
         "update_s": AverageMeter("updt_s", ":.3f"),
         "dataloading_s": AverageMeter("data_s", ":.3f"),
+        "ppo_loss": AverageMeter("ppo_loss", ":.3f"),
     }
 
     print("[DEBUG] Initializing train tracker")
