@@ -449,12 +449,12 @@ class SmolVLAPolicy(PreTrainedPolicy):
             # `self.predict_action_chunk` returns a (batch_size, n_action_steps, action_dim) tensor, but the queue
             # effectively has shape (n_action_steps, batch_size, *), hence the transpose.
             self._queues[ACTION].extend(actions.transpose(0, 1)[: self.config.n_action_steps])
-        # if len(self._queues[ACTION]) < 40:
-        #     actions = self._get_action_chunk(batch, noise)
-        #     self._queues = {
-        #         ACTION: deque(maxlen=self.config.n_action_steps),
-        #     }
-        #     self._queues[ACTION].extend(actions.transpose(0, 1)[: self.config.n_action_steps])
+        if len(self._queues[ACTION]) < 40:
+            actions = self._get_action_chunk(batch, noise)
+            self._queues = {
+                ACTION: deque(maxlen=self.config.n_action_steps),
+            }
+            self._queues[ACTION].extend(actions.transpose(0, 1)[: self.config.n_action_steps])
         return self._queues[ACTION].popleft()
 
     def forward(self, batch: dict[str, Tensor], noise=None, time=None) -> dict[str, Tensor]:
