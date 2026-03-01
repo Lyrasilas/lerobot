@@ -382,8 +382,6 @@ class SmolVLAPolicy(PreTrainedPolicy):
     def get_optim_params(self) -> dict:
         return self.parameters()
 
-
-    # TODO: adjust this method for on demand action chunk updates if needed, due to new observation inputs which invalidate next actions in the chunk.
     def _get_action_chunk(self, batch: dict[str, Tensor], noise: Tensor | None = None) -> Tensor:
         # TODO: Check if this for loop is needed.
         # Context: In fact, self.queues contains only ACTION field, and in inference, we don't have action in the batch
@@ -396,11 +394,9 @@ class SmolVLAPolicy(PreTrainedPolicy):
 
         images, img_masks = self.prepare_images(batch)
         state = self.prepare_state(batch)
-        # print("DEBUG: state before prepare_language", state)
         lang_tokens, lang_masks = self.prepare_language(batch)
 
         actions = self.model.sample_actions(images, img_masks, lang_tokens, lang_masks, state, noise=noise)
-        # print("DEBUG: actions before unnormalize", actions)
         # Unpad actions
         original_action_dim = self.config.action_feature.shape[0]
         actions = actions[:, :, :original_action_dim]
@@ -445,7 +441,6 @@ class SmolVLAPolicy(PreTrainedPolicy):
         # querying the policy.
         if len(self._queues[ACTION]) == 0:
             actions = self._get_action_chunk(batch, noise)
-            # print("[DEBUG] New action chunk predicted:", actions)
             # `self.predict_action_chunk` returns a (batch_size, n_action_steps, action_dim) tensor, but the queue
             # effectively has shape (n_action_steps, batch_size, *), hence the transpose.
             self._queues[ACTION].extend(actions.transpose(0, 1)[: self.config.n_action_steps])
@@ -469,7 +464,6 @@ class SmolVLAPolicy(PreTrainedPolicy):
         lang_tokens, lang_masks = self.prepare_language(batch)
         actions = self.prepare_action(batch)
         actions_is_pad = batch.get("actions_is_pad")
-        # print("DEBUG: actions shape", actions.shape)
         
         loss_dict = {}
         losses, mean, std, value = self.model.forward(images, img_masks, lang_tokens, lang_masks, state, actions, noise, time)
@@ -486,7 +480,6 @@ class SmolVLAPolicy(PreTrainedPolicy):
 
         # For backward pass
         loss = losses.mean()
-        # print("DEBUG: final loss", loss)
         # For backward pass
         loss_dict["loss"] = loss.item()
         return loss, loss_dict, mean, std, value
@@ -595,6 +588,7 @@ class SmolVLAPolicy(PreTrainedPolicy):
         actions = pad_vector(batch[ACTION], self.config.max_action_dim)
         return actions
     
+    # For PPO interleaving, we need to be able to get the action distributions and values separately from the forward pass that computes the loss.
     def get_action_distributions(self, batch):
         _, _, mean, std, value = self.forward(batch)
         dists = torch.distributions.Normal(mean, std)
@@ -604,6 +598,7 @@ class SmolVLAPolicy(PreTrainedPolicy):
         _, _, _, _, value = self.forward(batch)
         return value
     
+    # For PPO interleaving, we need to be able to evaluate the actions generated
     def evaluate_actions(self, batch):
         ignored_keys = ["device"]
         device = batch["device"]
@@ -709,7 +704,7 @@ class VLAFlowMatching(nn.Module):
         self.action_in_proj = nn.Linear(self.config.max_action_dim, self.vlm_with_expert.expert_hidden_size)
         self.action_out_proj = nn.Linear(self.vlm_with_expert.expert_hidden_size, self.config.max_action_dim)
         
-        # Newly added actor heads for mean and logstd and value head for the critic.
+        # Newly added actor heads for mean and logstd and value head for the critic. This is for PPO interleaving
         
         self.actor_head_mean_proj = nn.Sequential(
             nn.Linear(self.vlm_with_expert.expert_hidden_size, self.vlm_with_expert.expert_hidden_size),
@@ -741,13 +736,6 @@ class VLAFlowMatching(nn.Module):
             if isinstance(m, nn.Linear):
                 nn.init.orthogonal_(m.weight, gain=1.0)
                 nn.init.zeros_(m.bias)
-        
-        # # Register forward hooks for debugging
-        # def hook_fn(module, input, output):
-        #     print(f"[HOOK] {module.__class__.__name__} was used in forward pass")
-        # self.actor_head_mean_proj.register_forward_hook(hook_fn)
-        # self.actor_head_logstd_proj.register_forward_hook(hook_fn)
-        # self.actor_head_value_proj.register_forward_hook(hook_fn)
 
         self.action_time_mlp_in = nn.Linear(
             self.vlm_with_expert.expert_hidden_size * 2, self.vlm_with_expert.expert_hidden_size
@@ -886,7 +874,6 @@ class VLAFlowMatching(nn.Module):
         att_masks = []
         
         # Fuse timestep + action information using an MLP
-        # print("DEBUG: noisy_actions shape", noisy_actions.shape[1])
         action_emb = self.action_in_proj(noisy_actions)
         device = action_emb.device
         bsize = action_emb.shape[0]
@@ -942,17 +929,11 @@ class VLAFlowMatching(nn.Module):
         prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
             images, img_masks, lang_tokens, lang_masks, state=state
         )
-        # print("DEBUG: prefix masks", prefix_pad_masks.shape, prefix_att_masks.shape )
-        # print("DEBUG: x_t shape", x_t.shape)
-        # print("DEBUG: time shape", time.shape)
         suffix_embs, suffix_pad_masks, suffix_att_masks = self.embed_suffix(x_t, time)
-        # print("DEBUG: suffix masks", suffix_pad_masks.shape, suffix_att_masks.shape )
 
         pad_masks = torch.cat([prefix_pad_masks, suffix_pad_masks], dim=1)
         att_masks = torch.cat([prefix_att_masks, suffix_att_masks], dim=1)
 
-        # print("DEBUG: masks in forward")
-        # print("DEBUG: masks shapes", pad_masks.shape, att_masks.shape)
         att_2d_masks = make_att_2d_masks(pad_masks, att_masks)
         position_ids = torch.cumsum(pad_masks, dim=1) - 1
         (_, suffix_out), _ = self.vlm_with_expert.forward(
@@ -966,17 +947,13 @@ class VLAFlowMatching(nn.Module):
         suffix_out = suffix_out[:, -self.config.chunk_size :]
         # Original openpi code, upcast attention output
         suffix_out = suffix_out.to(dtype=torch.float32)
-        # print("DEBUG: suffix_out", suffix_out, suffix_out.shape)
         v_t = self.action_out_proj(suffix_out)
-        # print("DEBUG: v_t", v_t, v_t.shape)
         mean = self.actor_head_mean_proj(suffix_out)
         logstd = self.actor_head_logstd_proj(suffix_out)
         mean = mean[..., :3]
         logstd = logstd[..., :3]
         value = self.actor_head_value_proj(suffix_out)
-        # print("DEBUG: ut_vt shapes", u_t.shape, v_t.shape)
         losses = F.mse_loss(u_t, v_t, reduction="none")
-        # print("DEBUG: losses", losses, losses.shape)
         std = torch.exp(logstd)
         return losses, mean, std, value
 
@@ -991,8 +968,6 @@ class VLAFlowMatching(nn.Module):
         prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
             images, img_masks, lang_tokens, lang_masks, state=state
         )
-        # print("DEBUG: prefix_embs shape", prefix_embs)
-        # print("DEBUG: masks in sampling")
         prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
         prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
         # Compute image and language key value cache
@@ -1035,7 +1010,6 @@ class VLAFlowMatching(nn.Module):
         batch_size = prefix_pad_masks.shape[0]
         prefix_len = prefix_pad_masks.shape[1]
         prefix_pad_2d_masks = prefix_pad_masks[:, None, :].expand(batch_size, suffix_len, prefix_len)
-        # print("DEBUG: suffix masks in denoise step")
         suffix_att_2d_masks = make_att_2d_masks(suffix_pad_masks, suffix_att_masks)
 
         full_att_2d_masks = torch.cat([prefix_pad_2d_masks, suffix_att_2d_masks], dim=2)

@@ -843,6 +843,7 @@ def concatenate_batch_transitions(
     return left_batch_transitions
 
 
+# This is a simple rollout buffer that was added for the PPO interleaving. It is not as fully featured as the ReplayBuffer and is designed to be used in a more specific way for PPO updates.
 class RolloutBufferTorch:
     def __init__(self, buffer_size, obs_shape, action_shape, device="cpu"):
         self.device = device
@@ -906,6 +907,15 @@ class RolloutBufferTorch:
         )
     
     def get_ppo_batch(self, start: int, end: int):
+        """
+        Batch for PPO update needs to contain:
+            - observations
+            - actions
+            - rewards
+            - dones
+            - log_probs
+            - values
+        """
         return {
             "observations": self.obs[start:end],
             "actions": self.actions[start:end],
@@ -916,10 +926,8 @@ class RolloutBufferTorch:
         }
     
     def get_smolvla_batch(self, start: int, end: int):
-        """
-        Returns a minibatch as a dict for PPO update.
-        
-        batch for smolvla needs to contain:
+        """        
+        Batch for smolvla needs to contain:
             - observation.images.front
             - actions
             - observation.state
@@ -946,7 +954,6 @@ class RolloutBufferTorch:
             "observation.state_is_pad": self.state_is_pads[start],
             "observation.images.front_is_pad": self.image_is_pads[start],
             "task": self.tasks[start],
-            # Add other fields as needed
         }
     
     def size(self):

@@ -265,7 +265,6 @@ def record_loop(
 
             action = {**arm_action, **base_action} if len(base_action) > 0 else arm_action
         else:
-            print("DEBUG: First reset point reached. Resetting environment...")
             robot.reset()
             if not log_reset_warning:
                 logging.info(
@@ -279,11 +278,9 @@ def record_loop(
 
         # Action can eventually be clipped using `max_relative_target`,
         # so action actually sent is saved in the dataset.
-        # print("[DEBUG] Action generated:", action)
         sent_action, done, info = robot.send_action(action)
 
         if done:
-            print("[DEBUG] Environment signaled done. Resetting environment...")
             robot.reset()
             events["exit_early"] = True
             with open("completion_percent.txt", "a") as f:
@@ -372,7 +369,6 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
                 single_task=cfg.dataset.single_task,
                 display_data=cfg.display_data,
             )
-            print("DEBUG:-------------------------------------------------------------------------")
             # Execute a few seconds without recording to give time to manually reset the environment
             # Skip reset for the last episode to be recorded
             if not events["stop_recording"] and (

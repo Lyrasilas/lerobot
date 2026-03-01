@@ -29,13 +29,24 @@ class DummyMotor:
 
 class Racecar(Robot):
     """
-    The Racecar robot platform, often used for autonomous driving research and education.
+    Simulation Robot class for a racecar using the CarRacing-v3 environment from Gymnasium. 
     """
 
     config_class = RacecarConfig
     name = "racecar"
 
     def __init__(self, config: RacecarConfig):
+        """
+        Initialize the Racecar robot with the given configuration.
+
+        Args:
+            config (RacecarConfig): Configuration object containing parameters for the racecar, such as motor settings and camera configurations.
+            
+        Info:
+            Render mode is set to "rgb_array" to not render to a window. If visualization is wanted use "human".
+            Track style can be set via the config parameter `track_style`, which is passed to the CarRacing environment. Options are "default", "circle_small" and "circle_large".
+            View is set to "car" to have the camera follow the car. Other option is "center" for a fixed camera view.
+        """
         super().__init__(config)
         self.config = config
         self.motors = {
@@ -44,9 +55,7 @@ class Racecar(Robot):
             "brake": DummyMotor(3, MotorNormMode.RANGE_0_1),
         }
         self.cameras = make_cameras_from_configs(config.cameras)
-        print("[DEBUG] Racecar motors and cameras initialized.")
         self.env = gymnasium.make("CarRacing-v3", render_mode="rgb_array", continuous=True, track_style=config.track_style, view="car")
-        print("[DEBUG] Racecar environment created successfully.")
         self._env_obs, _ = self.env.reset(seed=1)
         
     @property
@@ -92,7 +101,6 @@ class Racecar(Robot):
                     range_max=1.0 if self.motors[motor_name].norm_mode == MotorNormMode.RANGE_M1_1 else 1.0,
                 )
                 logger.info(f"Calibrated {motor_name} with default values.")
-        # self._save_calibration()
         logger.info("Racecar calibration completed.")
         
     def configure(self):
@@ -110,8 +118,6 @@ class Racecar(Robot):
 
         # Simulate capturing images from cameras
         for cam_key in self.cameras:
-            # cam_cfg = self.config.cameras[cam_key]
-            # obs_dict[cam_key] = np.zeros((cam_cfg.height, cam_cfg.width, 3), dtype=np.uint8)
             obs_dict[cam_key] = self._env_obs
             logger.debug(f"{self} simulated {cam_key} image.")
 
@@ -152,12 +158,9 @@ class Racecar(Robot):
             logger.debug(f"Set {motor_name} to {val}")
 
         # Simulate sending commands to the motors
-        # time.sleep(0.1)
         action_values = np.array([val for key, val in action.items() if key.endswith(".pos")], dtype=np.float32)
-        # print("[DEBUG] Sending action to Racecar environment:", action_values)
         self._env_obs, _, terminated, truncated, info = self.env.step(action_values)
         done = terminated or truncated
-        # logger.info("Actions sent to Racecar motors.")
 
         # Return the actual action sent
         return {f"{motor}.pos": val for motor, val in goal_pos.items()}, done, info

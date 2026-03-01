@@ -20,7 +20,6 @@ import time
 from contextlib import nullcontext
 from pprint import pformat
 from typing import Any
-# import numpy as np
 
 
 import torch
@@ -68,12 +67,6 @@ from lerobot.utils.wandb_utils import WandBLogger
 from lerobot.utils.buffer import RolloutBufferTorch
 
 
-def print_cuda_memory(tag=""):
-    if torch.cuda.is_available():
-        print(f"[{tag}] Allocated: {torch.cuda.memory_allocated() / 1e9:.2f} GB, "
-              f"Reserved: {torch.cuda.memory_reserved() / 1e9:.2f} GB")
-
-
 def update_policy(
     train_metrics: MetricsTracker,
     policy: PreTrainedPolicy,
@@ -89,30 +82,17 @@ def update_policy(
     device = get_device_from_parameters(policy)
     policy.train()
     with torch.autocast(device_type=device.type) if use_amp else nullcontext():
-        # print("DEBUG: batch action size", batch["action"].shape)
         loss, output_dict, mean, std, value = policy.forward(batch)
         # TODO(rcadene): policy.unnormalize_outputs(out_dict)
-    # print("DEBUG: look at output_dict to potentially put into replay buffer", output_dict)
     mean_aux = F.mse_loss(mean, batch["action"], reduction="mean")
-    # std_aux = F.mse_loss(std, torch.zeros_like(std), reduction="mean")
     value_aux = F.mse_loss(value, torch.zeros_like(value), reduction="mean")
     aux_loss = (
         mean_aux
-        # + 0.01 * std_aux
         + 0.01 * value_aux  # if you use value loss
     )
-    # print("DEBUG: main loss", loss)
-    # print("DEBUG: aux loss", aux_loss)
-    # print("DEBUG: aux loss is {perc:.2f}% of main loss".format(perc=aux_loss.item() * 100 / (loss.item() + 1e-8)))
     full_loss = loss + aux_loss
-    # print("DEBUG: full loss", full_loss)
     grad_scaler.scale(full_loss).backward()
 
-    # for name, param in policy.named_parameters():
-    #     if param.grad is None:
-    #         print(f"{name}: grad is None (not used in backward)")
-    #     elif (param.grad == 0).all():
-    #         print(f"{name}: grad is all zeros (not updated)")
     # Unscale the gradient of the optimizer's assigned params in-place **prior to gradient clipping**.
     grad_scaler.unscale_(optimizer)
 
@@ -160,16 +140,12 @@ def update_policy_ppo(
     device = get_device_from_parameters(policy)
     policy.train()
     with torch.autocast(device_type=device.type) if use_amp else nullcontext():
-        # print("DEBUG: batch action size", batch["action"].shape)
         loss_clip, loss_dict = ppo_clip_loss(policy, batch)
-        # print("DEBUG: PPO total loss", loss_clip)
     grad_scaler.scale(loss_clip).backward()
 
     # Unscale the gradient of the optimizer's assigned params in-place **prior to gradient clipping**.
-    # print("DEBUG: Optimizer", optimizer)
     grad_scaler.unscale_(optimizer)
 
-    # print("DEBUG:", grad_clip_norm)
 
     grad_norm = torch.nn.utils.clip_grad_norm_(
         policy.parameters(),
@@ -194,7 +170,6 @@ def update_policy_ppo(
         # To possibly update an internal buffer (for instance an Exponential Moving Average like in TDMPC).
         policy.update()
 
-    # train_metrics.loss = loss_clip.item()
     train_metrics.grad_norm = grad_norm.item()
     train_metrics.lr = optimizer.param_groups[0]["lr"]
     train_metrics.update_s = time.perf_counter() - start_time
@@ -229,14 +204,11 @@ def ppo_clip_loss(policy, batch, clip_epsilon=0.2, value_coef=0.5, entropy_coef=
     entropy_loss = -entropy_coef * entropy.mean()
     # Total loss
     loss = policy_loss + value_loss + entropy_loss
-    # print("DEBUG: PPO LOSS", loss)
     return loss, {"ppo_loss":loss.item() ,"policy_loss": policy_loss.item(), "value_loss": value_loss.item(), "entropy_loss": entropy_loss.item()}
 
 @parser.wrap()
 def train(cfg: TrainPipelineConfig):
-    print("[DEBUG] Training configuration:")
     cfg.validate()
-    print("[DEBUG] Training configuration after validation:")
     logging.info(pformat(cfg.to_dict()))
 
     if cfg.wandb.enable and cfg.wandb.project:
@@ -264,7 +236,6 @@ def train(cfg: TrainPipelineConfig):
         action_shape=dataset.features["action"]["shape"],
         device="cpu",
     )
-    # print("rollout_buffer", rollout_buffer.device)
 
     # Create environment used for evaluating checkpoints during training on simulation data.
     # On real-world data, no need to create an environment as evaluations are done outside train.py,
@@ -272,16 +243,13 @@ def train(cfg: TrainPipelineConfig):
     eval_env = None
     if cfg.eval_freq > 0 and cfg.env is not None:
         logging.info("Creating env")
-        # print("DEBUG:", cfg.eval.batch_size)
         eval_env = make_env(cfg.env, n_envs=cfg.eval.batch_size, use_async_envs=cfg.eval.use_async_envs)
 
-    print("[DEBUG] Creating policy")
     logging.info("Creating policy")
     policy = make_policy(
         cfg=cfg.policy,
         ds_meta=dataset.meta,
     )
-    print("[DEBUG] Policy created")
 
     logging.info("Creating optimizer and scheduler")
     
@@ -291,10 +259,8 @@ def train(cfg: TrainPipelineConfig):
     step = 0  # number of policy updates (forward + backward + optim)
 
     if cfg.resume:
-        print("[DEBUG] Loading training state from checkpoint")
         step, optimizer, lr_scheduler = load_training_state(cfg.checkpoint_path, optimizer, lr_scheduler)
 
-    print("[DEBUG] Counting parameters")
     num_learnable_params = sum(p.numel() for p in policy.parameters() if p.requires_grad)
     num_total_params = sum(p.numel() for p in policy.parameters())
 
@@ -308,7 +274,6 @@ def train(cfg: TrainPipelineConfig):
     logging.info(f"{num_total_params=} ({format_big_number(num_total_params)})")
 
 
-    print("[DEBUG] Creating dataloader")
     # create dataloader for offline training
     if hasattr(cfg.policy, "drop_n_last_frames"):
         shuffle = False
@@ -330,15 +295,10 @@ def train(cfg: TrainPipelineConfig):
         pin_memory=device.type == "cuda",
         drop_last=False,
     )
-    print("[DEBUG] Dataloader created")
     dl_iter = cycle(dataloader)
-    print("[DEBUG] Dataloader iterator created")
-
-    print("[DEBUG] Setting policy to train mode")
-
+    
     policy.train()
 
-    print("[DEBUG] Initializing metrics")
     train_metrics = {
         "loss": AverageMeter("loss", ":.3f"),
         "grad_norm": AverageMeter("grdn", ":.3f"),
@@ -348,14 +308,10 @@ def train(cfg: TrainPipelineConfig):
         "ppo_loss": AverageMeter("ppo_loss", ":.3f"),
     }
 
-    print("[DEBUG] Initializing train tracker")
     train_tracker = MetricsTracker(
         cfg.batch_size, dataset.num_frames, dataset.num_episodes, train_metrics, initial_step=step
-    )
-    print_cuda_memory("before main training loop")
-   
+    )   
 
-    print("[DEBUG] Starting training loop")
     logging.info("Start offline training on a fixed dataset")
 
     for _ in range(step, cfg.steps):
@@ -396,7 +352,7 @@ def train(cfg: TrainPipelineConfig):
                     "observation.images.front_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
                     "task": ["Drive on the road."],
                 }
-            print("DEBUG: Initial PPO batch created")
+            # NaN detection
             for k in batch:
                 if k == "task":
                     continue
@@ -474,13 +430,13 @@ def train(cfg: TrainPipelineConfig):
                     "observation.images.front_is_pad": torch.tensor(False).unsqueeze(0).unsqueeze(0).to(device),
                     "task": ["Drive on the road."],
                 }
+                # NaN detection
                 for k in batch:
                     if k == "task":
                         continue
                     if batch[k].isnan().any():
                         print("DEBUG: NaN in batch key", k)
 
-                # TODO: Put the scalars into tensors in the transition
                 transition = {
                                 "obs": prev_obs.permute(0,2,3,1).squeeze(0).detach().cpu(),
                                 "action": action_clamped.squeeze(0).squeeze(0).detach().cpu(),
@@ -501,7 +457,6 @@ def train(cfg: TrainPipelineConfig):
                 rollout_buffer.add(**transition)
 
             if rollout_buffer.ptr >= rollout_buffer.buffer_size:
-                    print("DEBUG: Performing PPO update from rollout buffer")
                     # compute GAE advantages
                     with torch.no_grad():
                         next_value = policy.get_value(batch).squeeze(0)
@@ -519,7 +474,6 @@ def train(cfg: TrainPipelineConfig):
                     # PPO update loop
                     ppo_batch_size = 50
                     ppo_epochs = get_scaled_ppo_epochs(step, cfg.steps)
-                    # ppo_epochs = 2
                     for epoch in range(ppo_epochs):
                         for start in range(0, rollout_buffer.buffer_size, ppo_batch_size):
                             end = start + ppo_batch_size
@@ -527,6 +481,7 @@ def train(cfg: TrainPipelineConfig):
                             for k in mbatch_ppo:
                                 if isinstance(mbatch_ppo[k], torch.Tensor):
                                     mbatch_ppo[k] = mbatch_ppo[k].to(device)
+                            # NaN detection
                             for k in mbatch_ppo:
                                 if k == "task":
                                     continue
@@ -536,6 +491,7 @@ def train(cfg: TrainPipelineConfig):
                             for k in mbatch_smolvla:
                                 if isinstance(mbatch_smolvla[k], torch.Tensor):
                                     mbatch_smolvla[k] = mbatch_smolvla[k].unsqueeze(0).to(device)
+                            # NaN detection
                             for k in mbatch_smolvla:
                                 if k == "task":
                                     continue
@@ -568,14 +524,13 @@ def train(cfg: TrainPipelineConfig):
 
 
             done = terminated or truncated
-            print("DEBUG: PPO episode done", done)
             step += 1
             for name, param in policy.named_parameters():
                 if "actor_head" in name:
                     param.requires_grad = False
                 else:
                     param.requires_grad = True
-            continue  # After one DRL/PPO step, break to return to SFT (offline) training does not work right now
+            continue  # After one DRL/PPO step, break to return to SFT
 
         start_time = time.perf_counter()
         batch = next(dl_iter)

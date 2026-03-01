@@ -76,11 +76,10 @@ class SmolVLAConfig(PreTrainedConfig):
     optimizer_betas: tuple[float, float] = (0.9, 0.95)
     optimizer_eps: float = 1e-8
     optimizer_weight_decay: float = 1e-10
-    # optimizer_grad_clip_norm: float = 10
     optimizer_grad_clip_norm: float = 1.0
 
     scheduler_warmup_steps: int = 1_000
-    scheduler_decay_steps: int = 30_000
+    scheduler_decay_steps: int = 30_000 # seems not to work, as higher decay steps were tried but had no effect on the actual decay
     scheduler_decay_lr: float = 2.5e-6
 
     vlm_model_name: str = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"  # Select the VLM backbone.
